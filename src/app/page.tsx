@@ -277,7 +277,6 @@ export default function HomePage() {
 
             <div className="badges">
               <span className="badge">{v.category}</span>
-              <span className="badge">Website</span>
             </div>
 
             <div className="actions">
