@@ -255,9 +255,21 @@ export default function HomePage() {
       </div>
 
       <div className="sub" style={{ marginTop: 14 }}>
-        Tip: Directions opens your Maps app on mobile automatically. “Near Me” provides better routing from your current
-        location.
-      </div>
+  Tip: Directions opens your Maps app on mobile automatically. “Near Me” provides better routing from your current
+  location.
+</div>
+
+<div
+  className="sub"
+  style={{
+    marginTop: 6,
+    opacity: 0.5,
+    fontSize: "12px",
+  }}
+>
+  Made by Donny Chung
+</div>
+
     </div>
   );
 }
