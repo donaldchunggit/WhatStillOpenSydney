@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Venue } from "@/lib/types";
 
-type ApiResponse =
-  | { error: string }
-  | { count: number; venues: Venue[] };
+type ApiResponse = { error: string } | { count: number; venues: Venue[] };
 
 function toDatetimeLocalValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -22,7 +20,10 @@ function toDatetimeLocalValue(d: Date) {
  * - Works on mobile (opens Maps app) and desktop (opens browser).
  * - If origin is provided, directions start from the user’s current coords.
  */
-function directionsUrl(destinationAddress: string, origin?: { lat: number; lng: number }) {
+function directionsUrl(
+  destinationAddress: string,
+  origin?: { lat: number; lng: number }
+) {
   const dest = encodeURIComponent(destinationAddress);
   if (!origin) {
     return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
@@ -31,13 +32,16 @@ function directionsUrl(destinationAddress: string, origin?: { lat: number; lng: 
 }
 
 export default function HomePage() {
-  const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
+  const [datetime, setDatetime] = useState<string>(() =>
+    toDatetimeLocalValue(new Date())
+  );
   const [suburb, setSuburb] = useState<string>("");
   const [category, setCategory] = useState<string>("");
 
-  // If you already implemented Near Me, keep these
   const [useNearMe, setUseNearMe] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
   const [radius, setRadius] = useState<number>(2500);
 
   const [loading, setLoading] = useState(false);
@@ -45,7 +49,10 @@ export default function HomePage() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [count, setCount] = useState<number>(0);
 
-  const categories = useMemo(() => ["", "Restaurant", "Cafe", "Dessert", "Activity"], []);
+  const categories = useMemo(
+    () => ["", "Restaurant", "Cafe", "Dessert", "Activity"],
+    []
+  );
 
   async function getMyLocation() {
     setError(null);
@@ -129,7 +136,10 @@ export default function HomePage() {
       <div className="header">
         <div>
           <div className="h1">What Still Open Sydney</div>
-          <div className="sub">Enter a time. Get venues that are open, with website links and directions.</div>
+          <div className="sub">
+            Enter a time. Get venues that are open, with website links and
+            directions.
+          </div>
         </div>
         <div className="sub">Live (Google Places)</div>
       </div>
@@ -197,7 +207,10 @@ export default function HomePage() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <div style={{ minWidth: 180, flex: "1 1 auto" }}>
               <label>Category (optional)</label>
-              <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              >
                 {categories.map((c) => (
                   <option key={c} value={c}>
                     {c === "" ? "Any" : c}
@@ -218,15 +231,48 @@ export default function HomePage() {
           Showing <b>{count}</b> place(s) open at the selected time.
         </div>
 
-        {error && <div style={{ marginTop: 10, color: "#ffb4b4" }}>{error}</div>}
+        {error && (
+          <div style={{ marginTop: 10, color: "#ffb4b4" }}>{error}</div>
+        )}
       </div>
 
       <div className="grid">
         {venues.map((v) => (
           <div key={v.id} className="card">
-            <div className="cardTitle">
-              <h3>{v.name}</h3>
-              <div className="small">{v.suburb}</div>
+            {/* ✅ Large image, title below */}
+            {v.photoName ? (
+              <img
+                src={`/api/photo?name=${encodeURIComponent(v.photoName)}&w=900`}
+                alt={v.name}
+                loading="lazy"
+                style={{
+                  width: "100%",
+                  height: 190,
+                  objectFit: "cover",
+                  borderRadius: 16,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "#0f0f0f",
+                  marginBottom: 12,
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: 190,
+                  borderRadius: 16,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "#0f0f0f",
+                  marginBottom: 12,
+                }}
+              />
+            )}
+
+            <div style={{ marginBottom: 10 }}>
+              <h3 style={{ margin: 0, lineHeight: 1.2 }}>{v.name}</h3>
+              <div className="small" style={{ marginTop: 6 }}>
+                {v.suburb}
+              </div>
             </div>
 
             <div className="badges">
@@ -236,7 +282,12 @@ export default function HomePage() {
 
             <div className="actions">
               {v.website && (
-                <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
+                <a
+                  className="actionBtn"
+                  href={v.website}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   Website
                 </a>
               )}
@@ -255,21 +306,20 @@ export default function HomePage() {
       </div>
 
       <div className="sub" style={{ marginTop: 14 }}>
-  Tip: Directions opens your Maps app on mobile automatically. “Near Me” provides better routing from your current
-  location.
-</div>
+        Tip: Directions opens your Maps app on mobile automatically. “Near Me”
+        provides better routing from your current location.
+      </div>
 
-<div
-  className="sub"
-  style={{
-    marginTop: 6,
-    opacity: 0.5,
-    fontSize: "12px",
-  }}
->
-  Made by Donny Chung
-</div>
-
+      <div
+        className="sub"
+        style={{
+          marginTop: 6,
+          opacity: 0.5,
+          fontSize: "12px",
+        }}
+      >
+        Made by Donny Chung
+      </div>
     </div>
   );
 }

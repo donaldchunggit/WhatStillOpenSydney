@@ -81,8 +81,9 @@ async function googleTextSearch(query: string) {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": key,
+      // ✅ Added places.photos so we can display venue images
       "X-Goog-FieldMask":
-        "places.id,places.displayName,places.websiteUri,places.formattedAddress,places.types,places.regularOpeningHours",
+        "places.id,places.displayName,places.websiteUri,places.formattedAddress,places.types,places.regularOpeningHours,places.photos",
     },
     body: JSON.stringify({
       textQuery: query,
@@ -146,6 +147,10 @@ export async function GET(req: Request) {
         website: p?.websiteUri || "",
         bookingUrl: null,
         hours: googleHoursToHours(p?.regularOpeningHours),
+
+        // ✅ New: first available photo reference name (not a URL)
+        // You will render it via /api/photo?name=... so you don't expose your API key.
+        photoName: p?.photos?.[0]?.name ?? null,
       };
     });
 
@@ -160,9 +165,6 @@ export async function GET(req: Request) {
       venues: openAtTime,
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
   }
 }
