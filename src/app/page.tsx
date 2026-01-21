@@ -1,65 +1,239 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useState } from "react";
+import type { Venue } from "@/lib/types";
+
+type ApiResponse =
+  | { error: string }
+  | { count: number; venues: Venue[] };
+
+function toDatetimeLocalValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+export default function HomePage() {
+  const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
+  const [suburb, setSuburb] = useState<string>("");
+  const [category, setCategory] = useState<string>("");
+
+  const [useNearMe, setUseNearMe] = useState(false);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [radius, setRadius] = useState<number>(2500);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [count, setCount] = useState<number>(0);
+
+  const categories = useMemo(() => ["", "Restaurant", "Cafe", "Dessert", "Activity"], []);
+
+  async function getMyLocation() {
+    setError(null);
+
+    if (!("geolocation" in navigator)) {
+      setError("Geolocation not supported in this browser.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setUseNearMe(true);
+      },
+      (e) => {
+        setError(
+          e.code === e.PERMISSION_DENIED
+            ? "Location permission denied. Allow location access to use Near Me."
+            : "Could not get your location."
+        );
+      },
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
+  }
+
+  async function runSearch() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams();
+      params.set("datetime", datetime);
+      if (category.trim()) params.set("category", category.trim());
+
+      let endpoint = "/api/search-google"; // suburb-based (text search) fallback
+
+      if (useNearMe) {
+        if (!coords) {
+          setLoading(false);
+          setError("Click “Use Near Me” to fetch your location first.");
+          return;
+        }
+        endpoint = "/api/search-nearby";
+        params.set("lat", String(coords.lat));
+        params.set("lng", String(coords.lng));
+        params.set("radius", String(radius));
+      } else {
+        if (suburb.trim()) params.set("suburb", suburb.trim());
+      }
+
+      const res = await fetch(`${endpoint}?${params.toString()}`);
+      const data: ApiResponse = await res.json();
+
+      if (!res.ok) {
+        setVenues([]);
+        setCount(0);
+        setError("error" in data ? data.error : "Search failed.");
+        return;
+      }
+
+      if ("venues" in data) {
+        setVenues(data.venues);
+        setCount(data.count);
+      }
+    } catch {
+      setError("Network error.");
+      setVenues([]);
+      setCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    runSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="container">
+      <div className="header">
+        <div>
+          <div className="h1">What Still Open Sydney</div>
+          <div className="sub">Enter a time. Get venues that are open, with booking or website links.</div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+        <div className="sub">Live (Google Places)</div>
+      </div>
+
+      <div className="panel">
+        <div className="row">
+          <div>
+            <label>Date & time</label>
+            <input
+              type="datetime-local"
+              value={datetime}
+              onChange={(e) => setDatetime(e.target.value)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
+
+          <div>
+            <label>Search mode</label>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseNearMe(false);
+                  setError(null);
+                }}
+                disabled={loading}
+              >
+                Suburb
+              </button>
+              <button type="button" onClick={getMyLocation} disabled={loading}>
+                Use Near Me
+              </button>
+              <div className="sub" style={{ alignSelf: "center" }}>
+                {useNearMe
+                  ? coords
+                    ? `Near Me active (${radius}m)`
+                    : "Near Me active (no coords yet)"
+                  : "Suburb mode"}
+              </div>
+            </div>
+          </div>
+
+          {!useNearMe ? (
+            <div>
+              <label>Suburb (optional)</label>
+              <input
+                placeholder="e.g. Newtown, CBD, Surry Hills"
+                value={suburb}
+                onChange={(e) => setSuburb(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div>
+              <label>Radius (meters)</label>
+              <input
+                type="number"
+                min={200}
+                max={50000}
+                step={100}
+                value={radius}
+                onChange={(e) => setRadius(Number(e.target.value))}
+              />
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 180, flex: "1 1 auto" }}>
+              <label>Category (optional)</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c === "" ? "Any" : c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "end" }}>
+              <button onClick={runSearch} disabled={loading}>
+                {loading ? "Searching..." : "Search"}
+              </button>
+            </div>
+          </div>
         </div>
-      </main>
+
+        <div style={{ marginTop: 10 }} className="sub">
+          Showing <b>{count}</b> place(s) open at the selected time.
+        </div>
+
+        {error && <div style={{ marginTop: 10, color: "#ffb4b4" }}>{error}</div>}
+      </div>
+
+      <div className="grid">
+        {venues.map((v) => (
+          <div key={v.id} className="card">
+            <div className="cardTitle">
+              <h3>{v.name}</h3>
+              <div className="small">{v.suburb}</div>
+            </div>
+
+            <div className="badges">
+              <span className="badge">{v.category}</span>
+              <span className="badge">Website</span>
+            </div>
+
+            <div className="actions">
+              {v.website && (
+                <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
+                  Website
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="sub" style={{ marginTop: 14 }}>
+        Note: “Near Me” requires location permission. It works on localhost; on a deployed site it requires HTTPS.
+      </div>
     </div>
   );
 }

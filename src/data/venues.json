@@ -1,0 +1,70 @@
+[
+  {
+    "id": "v1",
+    "name": "Harbour Late Bites",
+    "category": "Restaurant",
+    "suburb": "Sydney CBD",
+    "website": "https://example.com/harbour-late-bites",
+    "bookingUrl": "https://example.com/harbour-late-bites/book",
+    "hours": {
+      "mon": [["11:00", "23:00"]],
+      "tue": [["11:00", "23:00"]],
+      "wed": [["11:00", "23:00"]],
+      "thu": [["11:00", "23:00"]],
+      "fri": [["11:00", "01:30"]],
+      "sat": [["11:00", "01:30"]],
+      "sun": [["11:00", "22:00"]]
+    }
+  },
+  {
+    "id": "v2",
+    "name": "Night Owl Dessert Bar",
+    "category": "Dessert",
+    "suburb": "Newtown",
+    "website": "https://example.com/night-owl-dessert",
+    "bookingUrl": null,
+    "hours": {
+      "mon": [["17:00", "00:30"]],
+      "tue": [["17:00", "00:30"]],
+      "wed": [["17:00", "00:30"]],
+      "thu": [["17:00", "00:30"]],
+      "fri": [["17:00", "02:00"]],
+      "sat": [["12:00", "02:00"]],
+      "sun": [["12:00", "23:00"]]
+    }
+  },
+  {
+    "id": "v3",
+    "name": "Skyline Mini Golf",
+    "category": "Activity",
+    "suburb": "Darling Harbour",
+    "website": "https://example.com/skyline-minigolf",
+    "bookingUrl": "https://example.com/skyline-minigolf/tickets",
+    "hours": {
+      "mon": [["10:00", "22:00"]],
+      "tue": [["10:00", "22:00"]],
+      "wed": [["10:00", "22:00"]],
+      "thu": [["10:00", "22:00"]],
+      "fri": [["10:00", "23:59"]],
+      "sat": [["10:00", "23:59"]],
+      "sun": [["10:00", "21:00"]]
+    }
+  },
+  {
+    "id": "v4",
+    "name": "Sunrise Cafe",
+    "category": "Cafe",
+    "suburb": "Surry Hills",
+    "website": "https://example.com/sunrise-cafe",
+    "bookingUrl": null,
+    "hours": {
+      "mon": [["06:00", "15:00"]],
+      "tue": [["06:00", "15:00"]],
+      "wed": [["06:00", "15:00"]],
+      "thu": [["06:00", "15:00"]],
+      "fri": [["06:00", "15:00"]],
+      "sat": [["07:00", "14:00"]],
+      "sun": []
+    }
+  }
+]
