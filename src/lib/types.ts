@@ -8,7 +8,7 @@ export type Venue = {
   id: string;
   name: string;
   category: "Restaurant" | "Cafe" | "Dessert" | "Activity" | string;
-  suburb: string;
+  suburb: string; // can be full formatted address (recommended)
   website: string;
   bookingUrl: string | null;
   hours: Hours;

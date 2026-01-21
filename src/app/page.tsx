@@ -17,11 +17,25 @@ function toDatetimeLocalValue(d: Date) {
   return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 }
 
+/**
+ * Builds a Google Maps directions deep link.
+ * - Works on mobile (opens Maps app) and desktop (opens browser).
+ * - If origin is provided, directions start from the user’s current coords.
+ */
+function directionsUrl(destinationAddress: string, origin?: { lat: number; lng: number }) {
+  const dest = encodeURIComponent(destinationAddress);
+  if (!origin) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  }
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
+}
+
 export default function HomePage() {
   const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
   const [suburb, setSuburb] = useState<string>("");
   const [category, setCategory] = useState<string>("");
 
+  // If you already implemented Near Me, keep these
   const [useNearMe, setUseNearMe] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [radius, setRadius] = useState<number>(2500);
@@ -66,7 +80,7 @@ export default function HomePage() {
       params.set("datetime", datetime);
       if (category.trim()) params.set("category", category.trim());
 
-      let endpoint = "/api/search-google"; // suburb-based (text search) fallback
+      let endpoint = "/api/search-google";
 
       if (useNearMe) {
         if (!coords) {
@@ -115,7 +129,7 @@ export default function HomePage() {
       <div className="header">
         <div>
           <div className="h1">What Still Open Sydney</div>
-          <div className="sub">Enter a time. Get venues that are open, with booking or website links.</div>
+          <div className="sub">Enter a time. Get venues that are open, with website links and directions.</div>
         </div>
         <div className="sub">Live (Google Places)</div>
       </div>
@@ -226,13 +240,23 @@ export default function HomePage() {
                   Website
                 </a>
               )}
+
+              <a
+                className="actionBtn"
+                href={directionsUrl(v.suburb, coords ?? undefined)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Directions
+              </a>
             </div>
           </div>
         ))}
       </div>
 
       <div className="sub" style={{ marginTop: 14 }}>
-        Note: “Near Me” requires location permission. It works on localhost; on a deployed site it requires HTTPS.
+        Tip: Directions opens your Maps app on mobile automatically. “Near Me” provides better routing from your current
+        location.
       </div>
     </div>
   );
