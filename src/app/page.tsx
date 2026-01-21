@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Venue } from "@/lib/types";
+import type { Venue, Hours, DayKey, TimeRange } from "@/lib/types";
 
 type ApiResponse = { error: string } | { count: number; venues: Venue[] };
 
@@ -31,6 +31,87 @@ function directionsUrl(
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
 }
 
+/* ------------------ close-time helpers (client side) ------------------ */
+
+function dayKeyFromDate(d: Date): DayKey {
+  const map: DayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  return map[d.getDay()] ?? "mon";
+}
+
+function parseHHMM(hhmm: string) {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return { h, m };
+}
+
+function withTime(base: Date, hhmm: string): Date | null {
+  const t = parseHHMM(hhmm);
+  if (!t) return null;
+
+  const d = new Date(base);
+  d.setSeconds(0, 0);
+
+  // Treat 24:00 as end-of-day (next day at 00:00)
+  if (t.h === 24 && t.m === 0) {
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }
+
+  d.setHours(t.h, t.m, 0, 0);
+  return d;
+}
+
+function isWithinRange(at: Date, start: Date, end: Date) {
+  return at.getTime() >= start.getTime() && at.getTime() < end.getTime();
+}
+
+/**
+ * Returns the closing DateTime for the trading period that contains `at`, else null.
+ * Handles cross-midnight by assuming (close <= open) means close is next day.
+ */
+function getVenueCloseAt(hours: Hours, at: Date): Date | null {
+  const day: DayKey = dayKeyFromDate(at);
+  const ranges: TimeRange[] = hours?.[day] ?? [];
+
+  for (const [openStr, closeStr] of ranges) {
+    const open = withTime(at, openStr);
+    if (!open) continue;
+
+    let close = withTime(at, closeStr);
+    if (!close) continue;
+
+    if (close.getTime() <= open.getTime()) {
+      close = new Date(close);
+      close.setDate(close.getDate() + 1);
+    }
+
+    if (isWithinRange(at, open, close)) {
+      return close;
+    }
+  }
+
+  return null;
+}
+
+function formatClosesIn(closeAt: Date, at: Date) {
+  const ms = closeAt.getTime() - at.getTime();
+  if (ms <= 0) return "Closed";
+
+  const totalMins = Math.floor(ms / 60000);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+
+  if (h <= 0 && m <= 5) return "Closes very soon";
+  if (h <= 0) return `Closes in ${m}m`;
+  if (m === 0) return `Closes in ${h}h`;
+  return `Closes in ${h}h ${m}m`;
+}
+
+/* --------------------------------------------------------------------- */
+
 export default function HomePage() {
   const [datetime, setDatetime] = useState<string>(() =>
     toDatetimeLocalValue(new Date())
@@ -48,6 +129,13 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [count, setCount] = useState<number>(0);
+
+  // ✅ force a re-render every minute so "Closes in ..." updates live
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceTick((x) => x + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const categories = useMemo(
     () => ["", "Restaurant", "Cafe", "Dessert", "Activity"],
@@ -237,71 +325,83 @@ export default function HomePage() {
       </div>
 
       <div className="grid">
-        {venues.map((v) => (
-          <div key={v.id} className="card">
-            {/* ✅ Large image, title below */}
-            {v.photoName ? (
-              <img
-                src={`/api/photo?name=${encodeURIComponent(v.photoName)}&w=900`}
-                alt={v.name}
-                loading="lazy"
-                style={{
-                  width: "100%",
-                  height: 190,
-                  objectFit: "cover",
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  background: "#0f0f0f",
-                  marginBottom: 12,
-                }}
-              />
-            ) : (
-              <div
-                style={{
-                  width: "100%",
-                  height: 190,
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  background: "#0f0f0f",
-                  marginBottom: 12,
-                }}
-              />
-            )}
+        {venues.map((v) => {
+          const atDate = new Date(datetime); // uses selected datetime (local)
+          const closeAt = v.hours ? getVenueCloseAt(v.hours as Hours, atDate) : null;
 
-            <div style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: 0, lineHeight: 1.2 }}>{v.name}</h3>
-              <div className="small" style={{ marginTop: 6 }}>
-                {v.suburb}
+          return (
+            <div key={v.id} className="card">
+              {/* ✅ Large image, title below */}
+              {v.photoName ? (
+                <img
+                  src={`/api/photo?name=${encodeURIComponent(v.photoName)}&w=900`}
+                  alt={v.name}
+                  loading="lazy"
+                  style={{
+                    width: "100%",
+                    height: 190,
+                    objectFit: "cover",
+                    borderRadius: 16,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "#0f0f0f",
+                    marginBottom: 12,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: 190,
+                    borderRadius: 16,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "#0f0f0f",
+                    marginBottom: 12,
+                  }}
+                />
+              )}
+
+              <div style={{ marginBottom: 10 }}>
+                <h3 style={{ margin: 0, lineHeight: 1.2 }}>{v.name}</h3>
+                <div className="small" style={{ marginTop: 6 }}>
+                  {v.suburb}
+                </div>
+
+                {/* ✅ Countdown to close (updates every minute) */}
+                {closeAt && (
+                  <div className="small" style={{ marginTop: 6, opacity: 0.9 }}>
+                    {formatClosesIn(closeAt, atDate)}
+                  </div>
+                )}
               </div>
-            </div>
 
-            <div className="badges">
-              <span className="badge">{v.category}</span>
-            </div>
+              <div className="badges">
+                <span className="badge">{v.category}</span>
+              </div>
 
-            <div className="actions">
-              {v.website && (
+              <div className="actions">
+                {v.website && (
+                  <a
+                    className="actionBtn"
+                    href={v.website}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Website
+                  </a>
+                )}
+
                 <a
                   className="actionBtn"
-                  href={v.website}
+                  href={directionsUrl(v.suburb, coords ?? undefined)}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Website
+                  Directions
                 </a>
-              )}
-
-              <a
-                className="actionBtn"
-                href={directionsUrl(v.suburb, coords ?? undefined)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Directions
-              </a>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="sub" style={{ marginTop: 14 }}>
