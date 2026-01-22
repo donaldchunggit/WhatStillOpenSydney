@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Venue, Hours, DayKey, TimeRange } from "@/lib/types";
+import type { Venue, Hours, DayKey, TimeRange, Category } from "@/lib/types";
 
 type ApiResponse = { error: string } | { count: number; venues: Venue[] };
 
@@ -17,17 +17,14 @@ function toDatetimeLocalValue(d: Date) {
 
 /**
  * Builds a Google Maps directions deep link.
- * - Works on mobile (opens Maps app) and desktop (opens browser).
- * - If origin is provided, directions start from the user’s current coords.
  */
 function directionsUrl(
   destinationAddress: string,
   origin?: { lat: number; lng: number }
 ) {
   const dest = encodeURIComponent(destinationAddress);
-  if (!origin) {
+  if (!origin)
     return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
-  }
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
 }
 
@@ -53,7 +50,6 @@ function withTime(base: Date, hhmm: string): Date | null {
   const d = new Date(base);
   d.setSeconds(0, 0);
 
-  // Treat 24:00 as end-of-day (next day at 00:00)
   if (t.h === 24 && t.m === 0) {
     d.setHours(0, 0, 0, 0);
     d.setDate(d.getDate() + 1);
@@ -68,10 +64,6 @@ function isWithinRange(at: Date, start: Date, end: Date) {
   return at.getTime() >= start.getTime() && at.getTime() < end.getTime();
 }
 
-/**
- * Returns the closing DateTime for the trading period that contains `at`, else null.
- * Handles cross-midnight by assuming (close <= open) means close is next day.
- */
 function getVenueCloseAt(hours: Hours, at: Date): Date | null {
   const day: DayKey = dayKeyFromDate(at);
   const ranges: TimeRange[] = hours?.[day] ?? [];
@@ -83,14 +75,13 @@ function getVenueCloseAt(hours: Hours, at: Date): Date | null {
     let close = withTime(at, closeStr);
     if (!close) continue;
 
+    // Cross-midnight
     if (close.getTime() <= open.getTime()) {
       close = new Date(close);
       close.setDate(close.getDate() + 1);
     }
 
-    if (isWithinRange(at, open, close)) {
-      return close;
-    }
+    if (isWithinRange(at, open, close)) return close;
   }
 
   return null;
@@ -110,14 +101,46 @@ function formatClosesIn(closeAt: Date, at: Date) {
   return `Closes in ${h}h ${m}m`;
 }
 
-/* --------------------------------------------------------------------- */
+/* ------------------ EatClub helper (Option B) ------------------ */
+
+async function checkEatClub(
+  name: string
+): Promise<{ onEatClub: boolean; eatClubUrl: string | null }> {
+  const res = await fetch(`/api/eatclub-check?name=${encodeURIComponent(name)}`);
+  if (!res.ok) return { onEatClub: false, eatClubUrl: null };
+  const data = await res.json();
+  return {
+    onEatClub: Boolean(data.onEatClub),
+    eatClubUrl: data.eatClubUrl ?? null,
+  };
+}
+
+/* ------------------ Plan my night (client-side picker) ------------------ */
+
+function pickRandom<T>(arr: T[]) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function isActivityStrict(v: Venue) {
+  // Now that you have Category union including Bar, we can be strict:
+  // "Activity" only (not Bar, not food).
+  return v.category === "Activity";
+}
+
+function isFood(v: Venue) {
+  return v.category === "Restaurant" || v.category === "Cafe" || v.category === "Dessert";
+}
+
+function isBar(v: Venue) {
+  return v.category === "Bar";
+}
 
 export default function HomePage() {
   const [datetime, setDatetime] = useState<string>(() =>
     toDatetimeLocalValue(new Date())
   );
   const [suburb, setSuburb] = useState<string>("");
-  const [category, setCategory] = useState<string>("");
+  const [category, setCategory] = useState<Category | "">("");
 
   const [useNearMe, setUseNearMe] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
@@ -130,15 +153,23 @@ export default function HomePage() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [count, setCount] = useState<number>(0);
 
-  // ✅ force a re-render every minute so "Closes in ..." updates live
+  // Plan output
+  const [nightPlan, setNightPlan] = useState<{
+    restaurant?: Venue;
+    activity?: Venue;
+    bar?: Venue;
+  } | null>(null);
+
+  // force a re-render every minute so "Closes in ..." updates live
   const [, forceTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => forceTick((x) => x + 1), 60000);
     return () => clearInterval(t);
   }, []);
 
+  // ✅ Include Bar in UI dropdown (since types now include it)
   const categories = useMemo(
-    () => ["", "Restaurant", "Cafe", "Dessert", "Activity"],
+    () => ["", "Restaurant", "Cafe", "Dessert", "Activity", "Bar"] as const,
     []
   );
 
@@ -166,6 +197,38 @@ export default function HomePage() {
     );
   }
 
+  async function enrichEatClub(list: Venue[]) {
+    const need = list.filter((v) => typeof v.onEatClub === "undefined");
+    if (need.length === 0) return list;
+
+    const out: Venue[] = [...list];
+
+    const batchSize = 6;
+    for (let i = 0; i < need.length; i += batchSize) {
+      const batch = need.slice(i, i + batchSize);
+
+      const results = await Promise.all(
+        batch.map(async (v) => {
+          const r = await checkEatClub(v.name);
+          return { id: v.id, ...r };
+        })
+      );
+
+      for (const r of results) {
+        const idx = out.findIndex((x) => x.id === r.id);
+        if (idx >= 0) {
+          out[idx] = {
+            ...out[idx],
+            onEatClub: r.onEatClub,
+            eatClubUrl: r.eatClubUrl,
+          };
+        }
+      }
+    }
+
+    return out;
+  }
+
   async function runSearch() {
     setLoading(true);
     setError(null);
@@ -173,7 +236,7 @@ export default function HomePage() {
     try {
       const params = new URLSearchParams();
       params.set("datetime", datetime);
-      if (category.trim()) params.set("category", category.trim());
+      if (category) params.set("category", category);
 
       let endpoint = "/api/search-google";
 
@@ -196,6 +259,7 @@ export default function HomePage() {
 
       if (!res.ok) {
         setVenues([]);
+        setNightPlan(null);
         setCount(0);
         setError("error" in data ? data.error : "Search failed.");
         return;
@@ -203,16 +267,81 @@ export default function HomePage() {
 
       if ("venues" in data) {
         setVenues(data.venues);
+        setNightPlan(null);
         setCount(data.count);
+
+        const enriched = await enrichEatClub(data.venues);
+        setVenues(enriched);
       }
     } catch {
       setError("Network error.");
       setVenues([]);
+      setNightPlan(null);
       setCount(0);
     } finally {
       setLoading(false);
     }
   }
+
+  async function planMyNight() {
+  setLoading(true);
+  setError(null);
+  setNightPlan(null);
+
+  try {
+    const baseParams = new URLSearchParams();
+    baseParams.set("datetime", datetime);
+
+    if (useNearMe) {
+      if (!coords) {
+        setError("Location not available.");
+        setLoading(false);
+        return;
+      }
+      baseParams.set("lat", String(coords.lat));
+      baseParams.set("lng", String(coords.lng));
+      baseParams.set("radius", String(radius));
+    } else {
+      if (suburb.trim()) baseParams.set("suburb", suburb.trim());
+    }
+
+    const endpoint = useNearMe
+      ? "/api/search-nearby"
+      : "/api/search-google";
+
+    const fetchCategory = async (cat: string) => {
+      const p = new URLSearchParams(baseParams);
+      p.set("category", cat);
+      const r = await fetch(`${endpoint}?${p.toString()}`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return d.venues ?? [];
+    };
+
+    const [restaurants, activities, bars] = await Promise.all([
+      fetchCategory("Restaurant"),
+      fetchCategory("Activity"),
+      fetchCategory("Bar"),
+    ]);
+
+    if (!restaurants.length || !activities.length || !bars.length) {
+      setError("Not enough open venues to plan a full night. Try another time.");
+      setLoading(false);
+      return;
+    }
+
+    setNightPlan({
+      restaurant: pickRandom(restaurants),
+      activity: pickRandom(activities),
+      bar: pickRandom(bars),
+    });
+  } catch {
+    setError("Could not plan night. Network error.");
+  } finally {
+    setLoading(false);
+  }
+}
+
 
   useEffect(() => {
     runSearch();
@@ -229,21 +358,119 @@ export default function HomePage() {
             directions.
           </div>
         </div>
-        <div className="sub">Live (Google Places)</div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="sub">Live (Google Places)</div>
+
+          <button type="button" onClick={planMyNight} disabled={loading}>
+            Plan my night for me
+          </button>
+        </div>
       </div>
 
+      {nightPlan && (
+        <div className="panel" style={{ marginTop: 14 }}>
+          <div className="sub" style={{ marginBottom: 10 }}>
+            Suggested night plan (based on what’s open right now):
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            {(["restaurant", "activity", "bar"] as const).map((k) => {
+              const v = nightPlan[k];
+              if (!v) return null;
+
+              const label =
+                k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
+
+              return (
+                <div
+                  key={k}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    borderRadius: 16,
+                    padding: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
+                    <div style={{ fontWeight: 700 }}>{v.name}</div>
+                    <div className="small" style={{ marginTop: 4 }}>
+                      {v.suburb}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {v.website && (
+                      <a
+                        className="actionBtn"
+                        href={v.website}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Website
+                      </a>
+                    )}
+                    <a
+                      className="actionBtn"
+                      href={directionsUrl(v.suburb, coords ?? undefined)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Directions
+                    </a>
+                    {v.onEatClub && v.eatClubUrl && (
+                      <a
+                        className="actionBtn"
+                        href={v.eatClubUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        EatClub
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
+            Tip: Hit the button again to re-roll.
+          </div>
+        </div>
+      )}
+
       <div className="panel">
-        <div className="row">
-          <div>
+        <div
+          className="row"
+          style={{
+            // ✅ This prevents the datetime input from blowing out the row on small widths
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 14,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
             <label>Date & time</label>
+            {/* ✅ Fix: force the time input to stay inside its grid cell */}
             <input
               type="datetime-local"
               value={datetime}
               onChange={(e) => setDatetime(e.target.value)}
+              style={{
+                width: "100%",
+                maxWidth: "100%",
+                boxSizing: "border-box",
+              }}
             />
           </div>
 
-          <div>
+          <div style={{ minWidth: 0 }}>
             <label>Search mode</label>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
@@ -270,16 +497,21 @@ export default function HomePage() {
           </div>
 
           {!useNearMe ? (
-            <div>
+            <div style={{ minWidth: 0 }}>
               <label>Suburb (optional)</label>
               <input
                 placeholder="e.g. Newtown, CBD, Surry Hills"
                 value={suburb}
                 onChange={(e) => setSuburb(e.target.value)}
+                style={{
+                  width: "100%",
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
               />
             </div>
           ) : (
-            <div>
+            <div style={{ minWidth: 0 }}>
               <label>Radius (meters)</label>
               <input
                 type="number"
@@ -288,16 +520,26 @@ export default function HomePage() {
                 step={100}
                 value={radius}
                 onChange={(e) => setRadius(Number(e.target.value))}
+                style={{
+                  width: "100%",
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
               />
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
             <div style={{ minWidth: 180, flex: "1 1 auto" }}>
               <label>Category (optional)</label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(e) => setCategory(e.target.value as Category | "")}
+                style={{
+                  width: "100%",
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
               >
                 {categories.map((c) => (
                   <option key={c} value={c}>
@@ -326,12 +568,11 @@ export default function HomePage() {
 
       <div className="grid">
         {venues.map((v) => {
-          const atDate = new Date(datetime); // uses selected datetime (local)
+          const atDate = new Date(datetime);
           const closeAt = v.hours ? getVenueCloseAt(v.hours as Hours, atDate) : null;
 
           return (
             <div key={v.id} className="card">
-              {/* ✅ Large image, title below */}
               {v.photoName ? (
                 <img
                   src={`/api/photo?name=${encodeURIComponent(v.photoName)}&w=900`}
@@ -366,7 +607,6 @@ export default function HomePage() {
                   {v.suburb}
                 </div>
 
-                {/* ✅ Countdown to close (updates every minute) */}
                 {closeAt && (
                   <div className="small" style={{ marginTop: 6, opacity: 0.9 }}>
                     {formatClosesIn(closeAt, atDate)}
@@ -376,6 +616,15 @@ export default function HomePage() {
 
               <div className="badges">
                 <span className="badge">{v.category}</span>
+
+                {v.onEatClub && (
+                  <span
+                    className="badge"
+                    style={{ borderColor: "rgba(255,255,255,0.25)" }}
+                  >
+                    EatClub
+                  </span>
+                )}
               </div>
 
               <div className="actions">
@@ -398,6 +647,17 @@ export default function HomePage() {
                 >
                   Directions
                 </a>
+
+                {v.onEatClub && v.eatClubUrl && (
+                  <a
+                    className="actionBtn"
+                    href={v.eatClubUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    EatClub
+                  </a>
+                )}
               </div>
             </div>
           );
@@ -411,11 +671,7 @@ export default function HomePage() {
 
       <div
         className="sub"
-        style={{
-          marginTop: 6,
-          opacity: 0.5,
-          fontSize: "12px",
-        }}
+        style={{ marginTop: 6, opacity: 0.5, fontSize: "12px" }}
       >
         Made by Donny Chung
       </div>

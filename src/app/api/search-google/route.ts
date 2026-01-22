@@ -1,3 +1,4 @@
+// app/api/search-google/route.ts
 import { NextResponse } from "next/server";
 import type { Venue, DayKey, Hours } from "@/lib/types";
 import { isVenueOpenAt } from "@/lib/time";
@@ -51,23 +52,62 @@ function googleHoursToHours(roh: any): Hours {
   for (const p of periods) {
     const open = p?.open;
     const close = p?.close;
-
-    // If Google doesn't provide a close, skip for MVP.
     if (!open || !close) continue;
 
     const d = dayKey(open.day);
-
     const openTime = hhmm(open.hour, open.minute);
-
-    // If close.day differs from open.day, it's still fine:
-    // We'll store close time as HH:MM; if it's next day it will usually be smaller than openTime,
-    // which your isVenueOpenAt() already handles as cross-midnight.
     const closeTime = normalizeCloseHHMM(close.hour, close.minute);
 
     out[d].push([openTime, closeTime]);
   }
 
   return out;
+}
+
+/**
+ * STRICT category inference:
+ * - Bars are "Bar" (not Activity)
+ * - Activity is only true activities (museum/cinema/attractions/parks/etc.)
+ */
+function inferCategory(types: string[]): string {
+  const t = new Set(types.map((x) => String(x).toLowerCase()));
+
+  // Food
+  if (t.has("restaurant") || t.has("meal_takeaway") || t.has("meal_delivery")) {
+    return "Restaurant";
+  }
+  if (t.has("cafe")) return "Cafe";
+  if (t.has("bakery") || t.has("ice_cream_shop") || t.has("dessert_shop")) {
+    return "Dessert";
+  }
+
+  // Bars / nightlife (separate)
+  if (t.has("bar") || t.has("night_club") || t.has("pub")) {
+    return "Bar";
+  }
+
+  // Strict activities
+  if (
+    t.has("tourist_attraction") ||
+    t.has("museum") ||
+    t.has("art_gallery") ||
+    t.has("movie_theater") ||
+    t.has("bowling_alley") ||
+    t.has("amusement_park") ||
+    t.has("zoo") ||
+    t.has("aquarium") ||
+    t.has("stadium") ||
+    t.has("park") ||
+    t.has("spa") ||
+    t.has("gym") ||
+    t.has("casino") ||
+    t.has("escape_room")
+  ) {
+    return "Activity";
+  }
+
+  // Default fallback (keeps UI stable)
+  return "Activity";
 }
 
 /* ---------- Google Places call ---------- */
@@ -81,7 +121,7 @@ async function googleTextSearch(query: string) {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": key,
-      // ✅ Added places.photos so we can display venue images
+      // ✅ include photos so we can return a photo reference name
       "X-Goog-FieldMask":
         "places.id,places.displayName,places.websiteUri,places.formattedAddress,places.types,places.regularOpeningHours,places.photos",
     },
@@ -128,35 +168,24 @@ export async function GET(req: Request) {
     const venues: Venue[] = places.map((p: any) => {
       const types: string[] = Array.isArray(p?.types) ? p.types : [];
 
-      const inferredCategory =
-        types.includes("restaurant")
-          ? "Restaurant"
-          : types.includes("cafe")
-          ? "Cafe"
-          : types.includes("bakery")
-          ? "Dessert"
-          : types.includes("tourist_attraction")
-          ? "Activity"
-          : "Activity";
-
       return {
         id: p?.id ?? `${p?.displayName?.text ?? "unknown"}-${Math.random()}`,
         name: p?.displayName?.text || "Unknown",
-        category: inferredCategory,
+        category: inferCategory(types),
         suburb: p?.formattedAddress || suburb,
         website: p?.websiteUri || "",
         bookingUrl: null,
         hours: googleHoursToHours(p?.regularOpeningHours),
-
-        // ✅ New: first available photo reference name (not a URL)
-        // You will render it via /api/photo?name=... so you don't expose your API key.
         photoName: p?.photos?.[0]?.name ?? null,
       };
     });
 
+    // ✅ FIX: allow true Activities even if they have no website
     const openAtTime = venues
-      .filter((v) => Boolean(v.website))
-      .filter((v) => (category ? v.category.toLowerCase() === category.toLowerCase() : true))
+      .filter((v) => (v.category === "Activity" ? true : Boolean(v.website)))
+      .filter((v) =>
+        category ? v.category.toLowerCase() === category.toLowerCase() : true
+      )
       .filter((v) => isVenueOpenAt(v.hours, datetime))
       .sort((a, b) => a.name.localeCompare(b.name));
 
