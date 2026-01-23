@@ -23,7 +23,8 @@ function directionsUrl(
   origin?: { lat: number; lng: number }
 ) {
   const dest = encodeURIComponent(destinationAddress);
-  if (!origin) return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  if (!origin)
+    return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
 }
 
@@ -107,38 +108,33 @@ async function checkEatClub(
 ): Promise<{ onEatClub: boolean; eatClubUrl: string | null }> {
   const res = await fetch(`/api/eatclub-check?name=${encodeURIComponent(name)}`);
   if (!res.ok) return { onEatClub: false, eatClubUrl: null };
-  const data = await res.json();
+
+  const data: unknown = await res.json();
+  const obj = (data ?? {}) as { onEatClub?: unknown; eatClubUrl?: unknown };
+
   return {
-    onEatClub: Boolean(data.onEatClub),
-    eatClubUrl: data.eatClubUrl ?? null,
+    onEatClub: Boolean(obj.onEatClub),
+    eatClubUrl: typeof obj.eatClubUrl === "string" ? obj.eatClubUrl : null,
   };
 }
 
 /* ------------------ Plan my night (client-side picker) ------------------ */
 
-function pickRandom<T>(arr: T[]) {
+function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function isActivityStrict(v: Venue) {
-  return v.category === "Activity";
-}
-
-function isFood(v: Venue) {
-  return v.category === "Restaurant" || v.category === "Cafe" || v.category === "Dessert";
-}
-
-function isBar(v: Venue) {
-  return v.category === "Bar";
-}
-
 export default function HomePage() {
-  const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
+  const [datetime, setDatetime] = useState<string>(() =>
+    toDatetimeLocalValue(new Date())
+  );
   const [suburb, setSuburb] = useState<string>("");
   const [category, setCategory] = useState<Category | "">("");
 
   const [useNearMe, setUseNearMe] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
   const [radius, setRadius] = useState<number>(2500);
 
   const [loading, setLoading] = useState(false);
@@ -299,13 +295,17 @@ export default function HomePage() {
 
       const endpoint = useNearMe ? "/api/search-nearby" : "/api/search-google";
 
-      const fetchCategory = async (cat: string) => {
+      const fetchCategory = async (cat: Category): Promise<Venue[]> => {
         const p = new URLSearchParams(baseParams);
         p.set("category", cat);
+
         const r = await fetch(`${endpoint}?${p.toString()}`);
         if (!r.ok) return [];
-        const d = await r.json();
-        return d.venues ?? [];
+
+        const d: ApiResponse = await r.json();
+        if (!("venues" in d)) return [];
+
+        return d.venues;
       };
 
       const [restaurants, activities, bars] = await Promise.all([
@@ -315,7 +315,9 @@ export default function HomePage() {
       ]);
 
       if (!restaurants.length || !activities.length || !bars.length) {
-        setError("Not enough open venues to plan a full night. Try another time.");
+        setError(
+          "Not enough open venues to plan a full night. Try another time."
+        );
         setLoading(false);
         return;
       }
@@ -325,13 +327,17 @@ export default function HomePage() {
       const used = new Set<string>([restaurant.id]);
 
       let activity = pickRandom(activities);
-      const altActivities = activities.filter((v: Venue) => !used.has(v.id));
-      if (used.has(activity.id) && altActivities.length) activity = pickRandom(altActivities);
+      const altActivities = activities.filter((v) => !used.has(v.id));
+      if (used.has(activity.id) && altActivities.length) {
+        activity = pickRandom(altActivities);
+      }
       used.add(activity.id);
 
       let bar = pickRandom(bars);
-      const altBars = bars.filter((v: Venue) => !used.has(v.id));
-      if (used.has(bar.id) && altBars.length) bar = pickRandom(altBars);
+      const altBars = bars.filter((v) => !used.has(v.id));
+      if (used.has(bar.id) && altBars.length) {
+        bar = pickRandom(altBars);
+      }
 
       setNightPlan({ restaurant, activity, bar });
     } catch {
@@ -352,7 +358,8 @@ export default function HomePage() {
         <div>
           <div className="h1">What Still Open Sydney</div>
           <div className="sub">
-            Enter a time. Get venues that are open, with website links and directions.
+            Enter a time. Get venues that are open, with website links and
+            directions.
           </div>
         </div>
 
@@ -370,7 +377,8 @@ export default function HomePage() {
               const v = nightPlan[k];
               if (!v) return null;
 
-              const label = k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
+              const label =
+                k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
 
               return (
                 <div
@@ -396,7 +404,12 @@ export default function HomePage() {
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {v.website && (
-                      <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
+                      <a
+                        className="actionBtn"
+                        href={v.website}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         Website
                       </a>
                     )}
@@ -409,7 +422,12 @@ export default function HomePage() {
                       Directions
                     </a>
                     {v.onEatClub && v.eatClubUrl && (
-                      <a className="actionBtn" href={v.eatClubUrl} target="_blank" rel="noreferrer">
+                      <a
+                        className="actionBtn"
+                        href={v.eatClubUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         EatClub
                       </a>
                     )}
@@ -439,7 +457,9 @@ export default function HomePage() {
             <input
               type="datetime-local"
               value={datetime}
-              onChange={(e) => setDatetime(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setDatetime(e.target.value)
+              }
               style={{
                 width: "100%",
                 maxWidth: "100%",
@@ -480,7 +500,9 @@ export default function HomePage() {
               <input
                 placeholder="e.g. Newtown, CBD, Surry Hills"
                 value={suburb}
-                onChange={(e) => setSuburb(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSuburb(e.target.value)
+                }
                 style={{
                   width: "100%",
                   maxWidth: "100%",
@@ -497,7 +519,9 @@ export default function HomePage() {
                 max={50000}
                 step={100}
                 value={radius}
-                onChange={(e) => setRadius(Number(e.target.value))}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setRadius(Number(e.target.value))
+                }
                 style={{
                   width: "100%",
                   maxWidth: "100%",
@@ -512,7 +536,9 @@ export default function HomePage() {
               <label>Category (optional)</label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value as Category | "")}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setCategory(e.target.value as Category | "")
+                }
                 style={{
                   width: "100%",
                   maxWidth: "100%",
@@ -527,7 +553,7 @@ export default function HomePage() {
               </select>
             </div>
 
-            {/* ✅ NUMBER 4: put Plan My Night next to Search (inside the search box) */}
+            {/* Plan My Night next to Search */}
             <div
               style={{
                 display: "flex",
