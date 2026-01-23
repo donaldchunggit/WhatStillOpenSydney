@@ -23,8 +23,7 @@ function directionsUrl(
   origin?: { lat: number; lng: number }
 ) {
   const dest = encodeURIComponent(destinationAddress);
-  if (!origin)
-    return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  if (!origin) return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
 }
 
@@ -122,8 +121,6 @@ function pickRandom<T>(arr: T[]) {
 }
 
 function isActivityStrict(v: Venue) {
-  // Now that you have Category union including Bar, we can be strict:
-  // "Activity" only (not Bar, not food).
   return v.category === "Activity";
 }
 
@@ -136,16 +133,12 @@ function isBar(v: Venue) {
 }
 
 export default function HomePage() {
-  const [datetime, setDatetime] = useState<string>(() =>
-    toDatetimeLocalValue(new Date())
-  );
+  const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
   const [suburb, setSuburb] = useState<string>("");
   const [category, setCategory] = useState<Category | "">("");
 
   const [useNearMe, setUseNearMe] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
-    null
-  );
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [radius, setRadius] = useState<number>(2500);
 
   const [loading, setLoading] = useState(false);
@@ -167,7 +160,6 @@ export default function HomePage() {
     return () => clearInterval(t);
   }, []);
 
-  // ✅ Include Bar in UI dropdown (since types now include it)
   const categories = useMemo(
     () => ["", "Restaurant", "Cafe", "Dessert", "Activity", "Bar"] as const,
     []
@@ -284,64 +276,70 @@ export default function HomePage() {
   }
 
   async function planMyNight() {
-  setLoading(true);
-  setError(null);
-  setNightPlan(null);
+    setLoading(true);
+    setError(null);
+    setNightPlan(null);
 
-  try {
-    const baseParams = new URLSearchParams();
-    baseParams.set("datetime", datetime);
+    try {
+      const baseParams = new URLSearchParams();
+      baseParams.set("datetime", datetime);
 
-    if (useNearMe) {
-      if (!coords) {
-        setError("Location not available.");
+      if (useNearMe) {
+        if (!coords) {
+          setError("Location not available.");
+          setLoading(false);
+          return;
+        }
+        baseParams.set("lat", String(coords.lat));
+        baseParams.set("lng", String(coords.lng));
+        baseParams.set("radius", String(radius));
+      } else {
+        if (suburb.trim()) baseParams.set("suburb", suburb.trim());
+      }
+
+      const endpoint = useNearMe ? "/api/search-nearby" : "/api/search-google";
+
+      const fetchCategory = async (cat: string) => {
+        const p = new URLSearchParams(baseParams);
+        p.set("category", cat);
+        const r = await fetch(`${endpoint}?${p.toString()}`);
+        if (!r.ok) return [];
+        const d = await r.json();
+        return d.venues ?? [];
+      };
+
+      const [restaurants, activities, bars] = await Promise.all([
+        fetchCategory("Restaurant"),
+        fetchCategory("Activity"),
+        fetchCategory("Bar"),
+      ]);
+
+      if (!restaurants.length || !activities.length || !bars.length) {
+        setError("Not enough open venues to plan a full night. Try another time.");
         setLoading(false);
         return;
       }
-      baseParams.set("lat", String(coords.lat));
-      baseParams.set("lng", String(coords.lng));
-      baseParams.set("radius", String(radius));
-    } else {
-      if (suburb.trim()) baseParams.set("suburb", suburb.trim());
-    }
 
-    const endpoint = useNearMe
-      ? "/api/search-nearby"
-      : "/api/search-google";
+      // Avoid duplicates if possible
+      const restaurant = pickRandom(restaurants);
+      const used = new Set<string>([restaurant.id]);
 
-    const fetchCategory = async (cat: string) => {
-      const p = new URLSearchParams(baseParams);
-      p.set("category", cat);
-      const r = await fetch(`${endpoint}?${p.toString()}`);
-      if (!r.ok) return [];
-      const d = await r.json();
-      return d.venues ?? [];
-    };
+      let activity = pickRandom(activities);
+      const altActivities = activities.filter((v: Venue) => !used.has(v.id));
+      if (used.has(activity.id) && altActivities.length) activity = pickRandom(altActivities);
+      used.add(activity.id);
 
-    const [restaurants, activities, bars] = await Promise.all([
-      fetchCategory("Restaurant"),
-      fetchCategory("Activity"),
-      fetchCategory("Bar"),
-    ]);
+      let bar = pickRandom(bars);
+      const altBars = bars.filter((v: Venue) => !used.has(v.id));
+      if (used.has(bar.id) && altBars.length) bar = pickRandom(altBars);
 
-    if (!restaurants.length || !activities.length || !bars.length) {
-      setError("Not enough open venues to plan a full night. Try another time.");
+      setNightPlan({ restaurant, activity, bar });
+    } catch {
+      setError("Could not plan night. Network error.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setNightPlan({
-      restaurant: pickRandom(restaurants),
-      activity: pickRandom(activities),
-      bar: pickRandom(bars),
-    });
-  } catch {
-    setError("Could not plan night. Network error.");
-  } finally {
-    setLoading(false);
   }
-}
-
 
   useEffect(() => {
     runSearch();
@@ -354,18 +352,11 @@ export default function HomePage() {
         <div>
           <div className="h1">What Still Open Sydney</div>
           <div className="sub">
-            Enter a time. Get venues that are open, with website links and
-            directions.
+            Enter a time. Get venues that are open, with website links and directions.
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className="sub">Live (Google Places)</div>
-
-          <button type="button" onClick={planMyNight} disabled={loading}>
-            Plan my night for me
-          </button>
-        </div>
+        <div className="sub">Live (Google Places)</div>
       </div>
 
       {nightPlan && (
@@ -379,8 +370,7 @@ export default function HomePage() {
               const v = nightPlan[k];
               if (!v) return null;
 
-              const label =
-                k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
+              const label = k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
 
               return (
                 <div
@@ -406,12 +396,7 @@ export default function HomePage() {
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {v.website && (
-                      <a
-                        className="actionBtn"
-                        href={v.website}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
                         Website
                       </a>
                     )}
@@ -424,12 +409,7 @@ export default function HomePage() {
                       Directions
                     </a>
                     {v.onEatClub && v.eatClubUrl && (
-                      <a
-                        className="actionBtn"
-                        href={v.eatClubUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="actionBtn" href={v.eatClubUrl} target="_blank" rel="noreferrer">
                         EatClub
                       </a>
                     )}
@@ -449,7 +429,6 @@ export default function HomePage() {
         <div
           className="row"
           style={{
-            // ✅ This prevents the datetime input from blowing out the row on small widths
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
             gap: 14,
@@ -457,7 +436,6 @@ export default function HomePage() {
         >
           <div style={{ minWidth: 0 }}>
             <label>Date & time</label>
-            {/* ✅ Fix: force the time input to stay inside its grid cell */}
             <input
               type="datetime-local"
               value={datetime}
@@ -549,9 +527,37 @@ export default function HomePage() {
               </select>
             </div>
 
-            <div style={{ display: "flex", alignItems: "end" }}>
+            {/* ✅ NUMBER 4: put Plan My Night next to Search (inside the search box) */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "end",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
               <button onClick={runSearch} disabled={loading}>
                 {loading ? "Searching..." : "Search"}
+              </button>
+
+              <button
+                type="button"
+                onClick={planMyNight}
+                disabled={loading || venues.length === 0}
+                title="Picks a Food, Activity and Bar that are open at this time"
+                style={{
+                  background: "#FFD54F",
+                  color: "#111",
+                  fontWeight: 800,
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  border: "none",
+                  cursor: loading || venues.length === 0 ? "not-allowed" : "pointer",
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.28)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Plan my night ✨
               </button>
             </div>
           </div>
@@ -561,9 +567,7 @@ export default function HomePage() {
           Showing <b>{count}</b> place(s) open at the selected time.
         </div>
 
-        {error && (
-          <div style={{ marginTop: 10, color: "#ffb4b4" }}>{error}</div>
-        )}
+        {error && <div style={{ marginTop: 10, color: "#ffb4b4" }}>{error}</div>}
       </div>
 
       <div className="grid">
@@ -618,10 +622,7 @@ export default function HomePage() {
                 <span className="badge">{v.category}</span>
 
                 {v.onEatClub && (
-                  <span
-                    className="badge"
-                    style={{ borderColor: "rgba(255,255,255,0.25)" }}
-                  >
+                  <span className="badge" style={{ borderColor: "rgba(255,255,255,0.25)" }}>
                     EatClub
                   </span>
                 )}
@@ -629,12 +630,7 @@ export default function HomePage() {
 
               <div className="actions">
                 {v.website && (
-                  <a
-                    className="actionBtn"
-                    href={v.website}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
                     Website
                   </a>
                 )}
@@ -649,12 +645,7 @@ export default function HomePage() {
                 </a>
 
                 {v.onEatClub && v.eatClubUrl && (
-                  <a
-                    className="actionBtn"
-                    href={v.eatClubUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a className="actionBtn" href={v.eatClubUrl} target="_blank" rel="noreferrer">
                     EatClub
                   </a>
                 )}
@@ -665,14 +656,11 @@ export default function HomePage() {
       </div>
 
       <div className="sub" style={{ marginTop: 14 }}>
-        Tip: Directions opens your Maps app on mobile automatically. “Near Me”
-        provides better routing from your current location.
+        Tip: Directions opens your Maps app on mobile automatically. “Near Me” provides better routing
+        from your current location.
       </div>
 
-      <div
-        className="sub"
-        style={{ marginTop: 6, opacity: 0.5, fontSize: "12px" }}
-      >
+      <div className="sub" style={{ marginTop: 6, opacity: 0.5, fontSize: "12px" }}>
         Made by Donny Chung
       </div>
     </div>
