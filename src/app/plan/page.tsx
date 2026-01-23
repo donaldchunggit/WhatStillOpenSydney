@@ -31,6 +31,43 @@ async function copyText(text: string) {
   }
 }
 
+/* ------------------ Google Calendar (3 separate events) ------------------ */
+
+function toGCalUtc(d: Date) {
+  // Google Calendar expects UTC format: YYYYMMDDTHHMMSSZ
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
+}
+
+function addToGoogleCalendarUrl(opts: {
+  title: string;
+  details?: string;
+  location?: string;
+  start: Date;
+  end: Date;
+}) {
+  const params = new URLSearchParams();
+  params.set("action", "TEMPLATE");
+  params.set("text", opts.title);
+  params.set("dates", `${toGCalUtc(opts.start)}/${toGCalUtc(opts.end)}`);
+  if (opts.details) params.set("details", opts.details);
+  if (opts.location) params.set("location", opts.location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function safeTitle(item: PlanItem) {
+  return (item.name && item.name.trim().length ? item.name.trim() : null) ?? `(ID: ${item.id})`;
+}
+
+function safeSuburb(item: PlanItem) {
+  return (item.suburb && item.suburb.trim().length ? item.suburb.trim() : null) ?? "Sydney";
+}
+
 export default function SharedPlanPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
 
@@ -105,6 +142,66 @@ export default function SharedPlanPage() {
 
   const fullUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
 
+  // Build 3 separate 1-hour events: Dinner -> Activity -> Drinks
+  const calLinks = (() => {
+    const baseStart = new Date(d as string);
+    if (Number.isNaN(baseStart.getTime())) return null;
+
+    const dinnerStart = baseStart;
+    const dinnerEnd = new Date(dinnerStart.getTime() + 60 * 60 * 1000);
+
+    const activityStart = dinnerEnd;
+    const activityEnd = new Date(activityStart.getTime() + 60 * 60 * 1000);
+
+    const drinksStart = activityEnd;
+    const drinksEnd = new Date(drinksStart.getTime() + 60 * 60 * 1000);
+
+    const dinnerTitle = `Dinner: ${safeTitle(restaurant)}`;
+    const activityTitle = `Activity: ${safeTitle(activity)}`;
+    const drinksTitle = `Drinks: ${safeTitle(bar)}`;
+
+    const dinnerLoc = safeSuburb(restaurant);
+    const activityLoc = safeSuburb(activity);
+    const drinksLoc = safeSuburb(bar);
+
+    const mkDetails = (label: string, item: PlanItem) => {
+      const lines: string[] = [];
+      lines.push(`Shared Night Plan (${label})`);
+      lines.push("");
+      lines.push(`Place: ${safeTitle(item)}`);
+      lines.push(`Suburb: ${safeSuburb(item)}`);
+      if (item.website) lines.push(`Website: ${item.website}`);
+      if (item.eatClubUrl) lines.push(`EatClub: ${item.eatClubUrl}`);
+      lines.push("");
+      lines.push(`Full plan link: ${fullUrl}`);
+      return lines.join("\n");
+    };
+
+    return {
+      dinner: addToGoogleCalendarUrl({
+        title: dinnerTitle,
+        location: dinnerLoc,
+        details: mkDetails("Dinner", restaurant),
+        start: dinnerStart,
+        end: dinnerEnd,
+      }),
+      activity: addToGoogleCalendarUrl({
+        title: activityTitle,
+        location: activityLoc,
+        details: mkDetails("Activity", activity),
+        start: activityStart,
+        end: activityEnd,
+      }),
+      drinks: addToGoogleCalendarUrl({
+        title: drinksTitle,
+        location: drinksLoc,
+        details: mkDetails("Drinks", bar),
+        start: drinksStart,
+        end: drinksEnd,
+      }),
+    };
+  })();
+
   const Card = ({
     label,
     item,
@@ -160,9 +257,7 @@ export default function SharedPlanPage() {
       <div className="header">
         <div>
           <div className="h1">Shared Night Plan</div>
-          <div className="sub">
-            {datetimeLabel ? `For: ${datetimeLabel}` : "Plan details"}
-          </div>
+          <div className="sub">{datetimeLabel ? `For: ${datetimeLabel}` : "Plan details"}</div>
         </div>
 
         <a className="actionBtn" href="/">
@@ -177,6 +272,7 @@ export default function SharedPlanPage() {
           <Card label="Bar" item={bar} />
         </div>
 
+        {/* Calendar actions */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
           <button
             type="button"
@@ -195,11 +291,31 @@ export default function SharedPlanPage() {
           <a className="actionBtn" href={fullUrl} target="_blank" rel="noreferrer">
             Open in new tab
           </a>
+
+          {calLinks && (
+            <>
+              <a className="actionBtn" href={calLinks.dinner} target="_blank" rel="noreferrer">
+                Add Dinner to Google Calendar
+              </a>
+              <a className="actionBtn" href={calLinks.activity} target="_blank" rel="noreferrer">
+                Add Activity to Google Calendar
+              </a>
+              <a className="actionBtn" href={calLinks.drinks} target="_blank" rel="noreferrer">
+                Add Drinks to Google Calendar
+              </a>
+            </>
+          )}
         </div>
 
+        {!calLinks && (
+          <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
+            Calendar links unavailable: invalid datetime in the share link.
+          </div>
+        )}
+
         <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
-          Note: If names are missing, the share link didn’t include fallback details. Re-share from the
-          homepage.
+          Note: If names are missing, the share link didn’t include fallback details. Re-share from
+          the homepage.
         </div>
       </div>
     </div>
