@@ -124,6 +124,56 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/* ------------------ Share plan helpers ------------------ */
+
+function buildSharePlanUrl(opts: {
+  datetime: string;
+  restaurant: Venue;
+  activity: Venue;
+  bar: Venue;
+}) {
+  const p = new URLSearchParams();
+
+  p.set("d", opts.datetime);
+  p.set("r", opts.restaurant.id);
+  p.set("a", opts.activity.id);
+  p.set("b", opts.bar.id);
+
+  // Fallback display info so /plan can render without refetch
+  p.set("rn", opts.restaurant.name);
+  p.set("an", opts.activity.name);
+  p.set("bn", opts.bar.name);
+
+  p.set("rs", opts.restaurant.suburb ?? "");
+  p.set("as", opts.activity.suburb ?? "");
+  p.set("bs", opts.bar.suburb ?? "");
+
+  if (opts.restaurant.website) p.set("rw", opts.restaurant.website);
+  if (opts.activity.website) p.set("aw", opts.activity.website);
+  if (opts.bar.website) p.set("bw", opts.bar.website);
+
+  if (opts.restaurant.onEatClub && opts.restaurant.eatClubUrl) {
+    p.set("re", opts.restaurant.eatClubUrl);
+  }
+  if (opts.activity.onEatClub && opts.activity.eatClubUrl) {
+    p.set("ae", opts.activity.eatClubUrl);
+  }
+  if (opts.bar.onEatClub && opts.bar.eatClubUrl) {
+    p.set("be", opts.bar.eatClubUrl);
+  }
+
+  return `/plan?${p.toString()}`;
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function HomePage() {
   const [datetime, setDatetime] = useState<string>(() =>
     toDatetimeLocalValue(new Date())
@@ -295,6 +345,7 @@ export default function HomePage() {
 
       const endpoint = useNearMe ? "/api/search-nearby" : "/api/search-google";
 
+      // ✅ Typed fetchCategory to avoid "unknown" errors
       const fetchCategory = async (cat: Category): Promise<Venue[]> => {
         const p = new URLSearchParams(baseParams);
         p.set("category", cat);
@@ -315,9 +366,7 @@ export default function HomePage() {
       ]);
 
       if (!restaurants.length || !activities.length || !bars.length) {
-        setError(
-          "Not enough open venues to plan a full night. Try another time."
-        );
+        setError("Not enough open venues to plan a full night. Try another time.");
         setLoading(false);
         return;
       }
@@ -347,6 +396,17 @@ export default function HomePage() {
     }
   }
 
+  // ✅ Share actions (only enabled when we have a full plan)
+  const sharePath =
+    nightPlan?.restaurant && nightPlan.activity && nightPlan.bar
+      ? buildSharePlanUrl({
+          datetime,
+          restaurant: nightPlan.restaurant,
+          activity: nightPlan.activity,
+          bar: nightPlan.bar,
+        })
+      : null;
+
   useEffect(() => {
     runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,8 +418,7 @@ export default function HomePage() {
         <div>
           <div className="h1">What Still Open Sydney</div>
           <div className="sub">
-            Enter a time. Get venues that are open, with website links and
-            directions.
+            Enter a time. Get venues that are open, with website links and directions.
           </div>
         </div>
 
@@ -404,12 +463,7 @@ export default function HomePage() {
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {v.website && (
-                      <a
-                        className="actionBtn"
-                        href={v.website}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="actionBtn" href={v.website} target="_blank" rel="noreferrer">
                         Website
                       </a>
                     )}
@@ -422,12 +476,7 @@ export default function HomePage() {
                       Directions
                     </a>
                     {v.onEatClub && v.eatClubUrl && (
-                      <a
-                        className="actionBtn"
-                        href={v.eatClubUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="actionBtn" href={v.eatClubUrl} target="_blank" rel="noreferrer">
                         EatClub
                       </a>
                     )}
@@ -435,6 +484,39 @@ export default function HomePage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* ✅ NEW: Share / Copy plan link */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+            <button
+              type="button"
+              disabled={!sharePath}
+              onClick={async () => {
+                if (!sharePath) return;
+
+                const full = `${window.location.origin}${sharePath}`;
+                const ok = await copyText(full);
+
+                if (!ok) {
+                  window.prompt("Copy this link:", full);
+                  return;
+                }
+
+                alert("Share link copied to clipboard.");
+              }}
+            >
+              Copy share link
+            </button>
+
+            {sharePath ? (
+              <a className="actionBtn" href={sharePath} target="_blank" rel="noreferrer">
+                Open share page
+              </a>
+            ) : (
+              <span className="sub" style={{ opacity: 0.7, alignSelf: "center" }}>
+                Create a plan first to share it.
+              </span>
+            )}
           </div>
 
           <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
@@ -457,9 +539,7 @@ export default function HomePage() {
             <input
               type="datetime-local"
               value={datetime}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setDatetime(e.target.value)
-              }
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDatetime(e.target.value)}
               style={{
                 width: "100%",
                 maxWidth: "100%",
@@ -500,9 +580,7 @@ export default function HomePage() {
               <input
                 placeholder="e.g. Newtown, CBD, Surry Hills"
                 value={suburb}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setSuburb(e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuburb(e.target.value)}
                 style={{
                   width: "100%",
                   maxWidth: "100%",
