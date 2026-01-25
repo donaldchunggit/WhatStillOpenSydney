@@ -5,6 +5,8 @@ import type { Venue, Hours, DayKey, TimeRange, Category } from "@/lib/types";
 
 type ApiResponse = { error: string } | { count: number; venues: Venue[] };
 
+/* ------------------ datetime helpers ------------------ */
+
 function toDatetimeLocalValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   const yyyy = d.getFullYear();
@@ -18,13 +20,9 @@ function toDatetimeLocalValue(d: Date) {
 /**
  * Builds a Google Maps directions deep link.
  */
-function directionsUrl(
-  destinationAddress: string,
-  origin?: { lat: number; lng: number }
-) {
+function directionsUrl(destinationAddress: string, origin?: { lat: number; lng: number }) {
   const dest = encodeURIComponent(destinationAddress);
-  if (!origin)
-    return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  if (!origin) return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest}`;
 }
 
@@ -50,6 +48,7 @@ function withTime(base: Date, hhmm: string): Date | null {
   const d = new Date(base);
   d.setSeconds(0, 0);
 
+  // Handle "24:00"
   if (t.h === 24 && t.m === 0) {
     d.setHours(0, 0, 0, 0);
     d.setDate(d.getDate() + 1);
@@ -101,7 +100,7 @@ function formatClosesIn(closeAt: Date, at: Date) {
   return `Closes in ${h}h ${m}m`;
 }
 
-/* ------------------ EatClub helper (Option B) ------------------ */
+/* ------------------ EatClub helper ------------------ */
 
 async function checkEatClub(
   name: string
@@ -118,73 +117,73 @@ async function checkEatClub(
   };
 }
 
-/* ------------------ Plan my night (client-side picker) ------------------ */
+/* ------------------ Lightweight Scoring System ------------------ */
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-/* ------------------ Share plan helpers ------------------ */
-
-function buildSharePlanUrl(opts: {
-  datetime: string;
-  restaurant: Venue;
-  activity: Venue;
-  bar: Venue;
-}) {
-  const p = new URLSearchParams();
-
-  p.set("d", opts.datetime);
-  p.set("r", opts.restaurant.id);
-  p.set("a", opts.activity.id);
-  p.set("b", opts.bar.id);
-
-  // Fallback display info so /plan can render without refetch
-  p.set("rn", opts.restaurant.name);
-  p.set("an", opts.activity.name);
-  p.set("bn", opts.bar.name);
-
-  p.set("rs", opts.restaurant.suburb ?? "");
-  p.set("as", opts.activity.suburb ?? "");
-  p.set("bs", opts.bar.suburb ?? "");
-
-  if (opts.restaurant.website) p.set("rw", opts.restaurant.website);
-  if (opts.activity.website) p.set("aw", opts.activity.website);
-  if (opts.bar.website) p.set("bw", opts.bar.website);
-
-  if (opts.restaurant.onEatClub && opts.restaurant.eatClubUrl) {
-    p.set("re", opts.restaurant.eatClubUrl);
-  }
-  if (opts.activity.onEatClub && opts.activity.eatClubUrl) {
-    p.set("ae", opts.activity.eatClubUrl);
-  }
-  if (opts.bar.onEatClub && opts.bar.eatClubUrl) {
-    p.set("be", opts.bar.eatClubUrl);
-  }
-
-  return `/plan?${p.toString()}`;
+function clamp01(x: number) {
+  return Math.max(0, Math.min(1, x));
 }
 
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
+/**
+ * Score uses only fields you actually have:
+ * - "open longer" (minutes til close) -> strong weight
+ * - EatClub bonus
+ * - actionability bonus: has website / bookingUrl
+ */
+function scoreVenue(v: Venue, atDate: Date): number {
+  // 1) Minutes until close (normalised to 0..1 using 4h cap)
+  let openNorm = 0.5; // neutral if something goes wrong
+  if (v.hours) {
+    const closeAt = getVenueCloseAt(v.hours as Hours, atDate);
+    if (closeAt) {
+      const mins = Math.max(0, Math.floor((closeAt.getTime() - atDate.getTime()) / 60000));
+      openNorm = clamp01(mins / 240);
+    } else {
+      openNorm = 0; // hours exist but not open => bad
+    }
   }
+
+  // 2) EatClub bonus (0/1)
+  const eatClubNorm = v.onEatClub ? 1 : 0;
+
+  // 3) Actionability bonus: website & bookingUrl
+  const hasWebsite = Boolean(v.website && v.website.trim().length);
+  const hasBooking = Boolean(v.bookingUrl && v.bookingUrl.trim().length);
+  const actionNorm = clamp01((Number(hasWebsite) + Number(hasBooking)) / 2);
+
+  // Weights (simple + explainable in an interview)
+  const wOpen = 0.6;
+  const wEat = 0.25;
+  const wAction = 0.15;
+
+  return wOpen * openNorm + wEat * eatClubNorm + wAction * actionNorm;
 }
+
+/**
+ * Pick randomly from the top N% by score (keeps variety while improving quality).
+ */
+function pickFromTopScored(list: Venue[], atDate: Date, topFraction = 0.25): Venue {
+  const scored = list
+    .map((v) => ({ v, s: scoreVenue(v, atDate) }))
+    .sort((a, b) => b.s - a.s);
+
+  const n = Math.max(1, Math.ceil(scored.length * topFraction));
+  const top = scored.slice(0, n).map((x) => x.v);
+  return pickRandom(top);
+}
+
+/* ------------------ Page ------------------ */
 
 export default function HomePage() {
-  const [datetime, setDatetime] = useState<string>(() =>
-    toDatetimeLocalValue(new Date())
-  );
+  const [datetime, setDatetime] = useState<string>(() => toDatetimeLocalValue(new Date()));
   const [suburb, setSuburb] = useState<string>("");
   const [category, setCategory] = useState<Category | "">("");
 
   const [useNearMe, setUseNearMe] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
-    null
-  );
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [radius, setRadius] = useState<number>(2500);
 
   const [loading, setLoading] = useState(false);
@@ -345,7 +344,6 @@ export default function HomePage() {
 
       const endpoint = useNearMe ? "/api/search-nearby" : "/api/search-google";
 
-      // ✅ Typed fetchCategory to avoid "unknown" errors
       const fetchCategory = async (cat: Category): Promise<Venue[]> => {
         const p = new URLSearchParams(baseParams);
         p.set("category", cat);
@@ -359,34 +357,39 @@ export default function HomePage() {
         return d.venues;
       };
 
-      const [restaurants, activities, bars] = await Promise.all([
+      const [restaurantsRaw, activitiesRaw, barsRaw] = await Promise.all([
         fetchCategory("Restaurant"),
         fetchCategory("Activity"),
         fetchCategory("Bar"),
       ]);
 
-      if (!restaurants.length || !activities.length || !bars.length) {
+      if (!restaurantsRaw.length || !activitiesRaw.length || !barsRaw.length) {
         setError("Not enough open venues to plan a full night. Try another time.");
         setLoading(false);
         return;
       }
 
-      // Avoid duplicates if possible
-      const restaurant = pickRandom(restaurants);
+      // Enrich so EatClub can influence scoring
+      const [restaurants, activities, bars] = await Promise.all([
+        enrichEatClub(restaurantsRaw),
+        enrichEatClub(activitiesRaw),
+        enrichEatClub(barsRaw),
+      ]);
+
+      const atDate = new Date(datetime);
+
+      // Weighted picks (top 25% by score)
+      const restaurant = pickFromTopScored(restaurants, atDate, 0.25);
       const used = new Set<string>([restaurant.id]);
 
-      let activity = pickRandom(activities);
-      const altActivities = activities.filter((v) => !used.has(v.id));
-      if (used.has(activity.id) && altActivities.length) {
-        activity = pickRandom(altActivities);
-      }
+      const activitiesNoDup = activities.filter((v) => !used.has(v.id));
+      const activityPool = activitiesNoDup.length ? activitiesNoDup : activities;
+      const activity = pickFromTopScored(activityPool, atDate, 0.25);
       used.add(activity.id);
 
-      let bar = pickRandom(bars);
-      const altBars = bars.filter((v) => !used.has(v.id));
-      if (used.has(bar.id) && altBars.length) {
-        bar = pickRandom(altBars);
-      }
+      const barsNoDup = bars.filter((v) => !used.has(v.id));
+      const barPool = barsNoDup.length ? barsNoDup : bars;
+      const bar = pickFromTopScored(barPool, atDate, 0.25);
 
       setNightPlan({ restaurant, activity, bar });
     } catch {
@@ -395,17 +398,6 @@ export default function HomePage() {
       setLoading(false);
     }
   }
-
-  // ✅ Share actions (only enabled when we have a full plan)
-  const sharePath =
-    nightPlan?.restaurant && nightPlan.activity && nightPlan.bar
-      ? buildSharePlanUrl({
-          datetime,
-          restaurant: nightPlan.restaurant,
-          activity: nightPlan.activity,
-          bar: nightPlan.bar,
-        })
-      : null;
 
   useEffect(() => {
     runSearch();
@@ -417,9 +409,7 @@ export default function HomePage() {
       <div className="header">
         <div>
           <div className="h1">What Still Open Sydney</div>
-          <div className="sub">
-            Enter a time. Get venues that are open, with website links and directions.
-          </div>
+          <div className="sub">Enter a time. Get venues that are open, with website links and directions.</div>
         </div>
 
         <div className="sub">Live (Google Places)</div>
@@ -428,7 +418,7 @@ export default function HomePage() {
       {nightPlan && (
         <div className="panel" style={{ marginTop: 14 }}>
           <div className="sub" style={{ marginBottom: 10 }}>
-            Suggested night plan (based on what’s open right now):
+            Suggested night plan (weighted for better picks):
           </div>
 
           <div style={{ display: "grid", gap: 10 }}>
@@ -436,8 +426,7 @@ export default function HomePage() {
               const v = nightPlan[k];
               if (!v) return null;
 
-              const label =
-                k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
+              const label = k === "restaurant" ? "Food" : k === "activity" ? "Activity" : "Bar";
 
               return (
                 <div
@@ -486,41 +475,8 @@ export default function HomePage() {
             })}
           </div>
 
-          {/* ✅ NEW: Share / Copy plan link */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-            <button
-              type="button"
-              disabled={!sharePath}
-              onClick={async () => {
-                if (!sharePath) return;
-
-                const full = `${window.location.origin}${sharePath}`;
-                const ok = await copyText(full);
-
-                if (!ok) {
-                  window.prompt("Copy this link:", full);
-                  return;
-                }
-
-                alert("Share link copied to clipboard.");
-              }}
-            >
-              Copy share link
-            </button>
-
-            {sharePath ? (
-              <a className="actionBtn" href={sharePath} target="_blank" rel="noreferrer">
-                Open share page
-              </a>
-            ) : (
-              <span className="sub" style={{ opacity: 0.7, alignSelf: "center" }}>
-                Create a plan first to share it.
-              </span>
-            )}
-          </div>
-
           <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
-            Tip: Hit the button again to re-roll.
+            Tip: Re-roll for variety; results are sampled from the best-scoring options.
           </div>
         </div>
       )}
@@ -540,11 +496,7 @@ export default function HomePage() {
               type="datetime-local"
               value={datetime}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDatetime(e.target.value)}
-              style={{
-                width: "100%",
-                maxWidth: "100%",
-                boxSizing: "border-box",
-              }}
+              style={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}
             />
           </div>
 
@@ -581,11 +533,7 @@ export default function HomePage() {
                 placeholder="e.g. Newtown, CBD, Surry Hills"
                 value={suburb}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuburb(e.target.value)}
-                style={{
-                  width: "100%",
-                  maxWidth: "100%",
-                  boxSizing: "border-box",
-                }}
+                style={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}
               />
             </div>
           ) : (
@@ -597,14 +545,8 @@ export default function HomePage() {
                 max={50000}
                 step={100}
                 value={radius}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setRadius(Number(e.target.value))
-                }
-                style={{
-                  width: "100%",
-                  maxWidth: "100%",
-                  boxSizing: "border-box",
-                }}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRadius(Number(e.target.value))}
+                style={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}
               />
             </div>
           )}
@@ -617,11 +559,7 @@ export default function HomePage() {
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                   setCategory(e.target.value as Category | "")
                 }
-                style={{
-                  width: "100%",
-                  maxWidth: "100%",
-                  boxSizing: "border-box",
-                }}
+                style={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}
               >
                 {categories.map((c) => (
                   <option key={c} value={c}>
@@ -631,15 +569,7 @@ export default function HomePage() {
               </select>
             </div>
 
-            {/* Plan My Night next to Search */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "end",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "end", gap: 10, flexWrap: "wrap" }}>
               <button onClick={runSearch} disabled={loading}>
                 {loading ? "Searching..." : "Search"}
               </button>
@@ -648,7 +578,7 @@ export default function HomePage() {
                 type="button"
                 onClick={planMyNight}
                 disabled={loading || venues.length === 0}
-                title="Picks a Food, Activity and Bar that are open at this time"
+                title="Weighted picks for Food, Activity and Bar"
                 style={{
                   background: "#FFD54F",
                   color: "#111",

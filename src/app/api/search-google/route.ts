@@ -1,6 +1,6 @@
 // app/api/search-google/route.ts
 import { NextResponse } from "next/server";
-import type { Venue, DayKey, Hours } from "@/lib/types";
+import type { Venue, DayKey, Hours, Category } from "@/lib/types";
 import { isVenueOpenAt } from "@/lib/time";
 
 export const runtime = "nodejs";
@@ -36,15 +36,7 @@ function normalizeCloseHHMM(h?: number, m?: number) {
  * - Fixes midnight close (00:00) -> 24:00.
  */
 function googleHoursToHours(roh: any): Hours {
-  const out: Hours = {
-    mon: [],
-    tue: [],
-    wed: [],
-    thu: [],
-    fri: [],
-    sat: [],
-    sun: [],
-  };
+  const out: Hours = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
 
   const periods = roh?.periods;
   if (!Array.isArray(periods)) return out;
@@ -69,22 +61,16 @@ function googleHoursToHours(roh: any): Hours {
  * - Bars are "Bar" (not Activity)
  * - Activity is only true activities (museum/cinema/attractions/parks/etc.)
  */
-function inferCategory(types: string[]): string {
+function inferCategory(types: string[]): Category {
   const t = new Set(types.map((x) => String(x).toLowerCase()));
 
   // Food
-  if (t.has("restaurant") || t.has("meal_takeaway") || t.has("meal_delivery")) {
-    return "Restaurant";
-  }
+  if (t.has("restaurant") || t.has("meal_takeaway") || t.has("meal_delivery")) return "Restaurant";
   if (t.has("cafe")) return "Cafe";
-  if (t.has("bakery") || t.has("ice_cream_shop") || t.has("dessert_shop")) {
-    return "Dessert";
-  }
+  if (t.has("bakery") || t.has("ice_cream_shop") || t.has("dessert_shop")) return "Dessert";
 
   // Bars / nightlife (separate)
-  if (t.has("bar") || t.has("night_club") || t.has("pub")) {
-    return "Bar";
-  }
+  if (t.has("bar") || t.has("night_club") || t.has("pub")) return "Bar";
 
   // Strict activities
   if (
@@ -121,9 +107,9 @@ async function googleTextSearch(query: string) {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": key,
-      // ✅ include photos so we can return a photo reference name
+      // ✅ add scoring fields + geometry
       "X-Goog-FieldMask":
-        "places.id,places.displayName,places.websiteUri,places.formattedAddress,places.types,places.regularOpeningHours,places.photos",
+        "places.id,places.displayName,places.websiteUri,places.formattedAddress,places.types,places.regularOpeningHours,places.photos,places.rating,places.userRatingCount,places.priceLevel,places.location",
     },
     body: JSON.stringify({
       textQuery: query,
@@ -167,6 +153,7 @@ export async function GET(req: Request) {
 
     const venues: Venue[] = places.map((p: any) => {
       const types: string[] = Array.isArray(p?.types) ? p.types : [];
+      const loc = p?.location;
 
       return {
         id: p?.id ?? `${p?.displayName?.text ?? "unknown"}-${Math.random()}`,
@@ -177,10 +164,17 @@ export async function GET(req: Request) {
         bookingUrl: null,
         hours: googleHoursToHours(p?.regularOpeningHours),
         photoName: p?.photos?.[0]?.name ?? null,
+
+        // ✅ new fields (safe if missing)
+        rating: typeof p?.rating === "number" ? p.rating : null,
+        userRatingsTotal: typeof p?.userRatingCount === "number" ? p.userRatingCount : null,
+        priceLevel: typeof p?.priceLevel === "number" ? p.priceLevel : null,
+        lat: typeof loc?.latitude === "number" ? loc.latitude : null,
+        lng: typeof loc?.longitude === "number" ? loc.longitude : null,
       };
     });
 
-    // ✅ FIX: allow true Activities even if they have no website
+    // ✅ allow Activities even if no website
     const openAtTime = venues
       .filter((v) => (v.category === "Activity" ? true : Boolean(v.website)))
       .filter((v) =>
@@ -194,6 +188,9 @@ export async function GET(req: Request) {
       venues: openAtTime,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message ?? "Server error" },
+      { status: 500 }
+    );
   }
 }

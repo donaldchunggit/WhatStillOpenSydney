@@ -1,6 +1,6 @@
 // app/api/search-nearby/route.ts
 import { NextResponse } from "next/server";
-import type { DayKey, Hours, Venue } from "@/lib/types";
+import type { DayKey, Hours, Venue, Category } from "@/lib/types";
 import { isVenueOpenAt } from "@/lib/time";
 
 export const runtime = "nodejs";
@@ -69,7 +69,7 @@ function googleHoursToHours(roh: any): Hours {
  * - Bars are "Bar" (not Activity)
  * - Activities are only true activities (attractions, cinema, museum, etc.)
  */
-function inferCategory(types: string[]): string {
+function inferCategory(types: string[]): Category {
   const t = new Set(types.map((x) => String(x).toLowerCase()));
 
   // Food
@@ -142,6 +142,29 @@ function categoryToIncludedTypes(category: string): string[] {
   return [];
 }
 
+/**
+ * Haversine distance (meters)
+ */
+function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 /* ---------- Google Places: Nearby Search (New) ---------- */
 
 async function googleNearbySearch(args: {
@@ -172,9 +195,9 @@ async function googleNearbySearch(args: {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": key,
-      // ✅ includes photos so you can render images
+      // ✅ ADD scoring + geometry fields
       "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.websiteUri,places.types,places.regularOpeningHours,places.photos",
+        "places.id,places.displayName,places.formattedAddress,places.websiteUri,places.types,places.regularOpeningHours,places.photos,places.rating,places.userRatingCount,places.priceLevel,places.location",
     },
     body: JSON.stringify(body),
   });
@@ -221,8 +244,20 @@ export async function GET(req: Request) {
 
     const places = Array.isArray(data?.places) ? data.places : [];
 
+    const origin = { lat, lng };
+
     const venues: Venue[] = places.map((p: any) => {
       const types: string[] = Array.isArray(p?.types) ? p.types : [];
+      const loc = p?.location;
+
+      const vLat = typeof loc?.latitude === "number" ? loc.latitude : null;
+      const vLng = typeof loc?.longitude === "number" ? loc.longitude : null;
+
+      // Optional: precompute distance for scoring
+      const dist =
+        typeof vLat === "number" && typeof vLng === "number"
+          ? Math.round(distanceMeters(origin, { lat: vLat, lng: vLng }))
+          : null;
 
       return {
         id: p?.id ?? `${p?.displayName?.text ?? "unknown"}-${Math.random()}`,
@@ -233,10 +268,20 @@ export async function GET(req: Request) {
         bookingUrl: null,
         hours: googleHoursToHours(p?.regularOpeningHours),
         photoName: p?.photos?.[0]?.name ?? null,
+
+        // ✅ scoring fields
+        rating: typeof p?.rating === "number" ? p.rating : null,
+        userRatingsTotal: typeof p?.userRatingCount === "number" ? p.userRatingCount : null,
+        priceLevel: typeof p?.priceLevel === "number" ? p.priceLevel : null,
+        lat: vLat,
+        lng: vLng,
+
+        // ✅ optional (only keep if you want it in Venue)
+        // distanceM: dist,
       };
     });
 
-    // ✅ FIX: allow true Activities even if they have no website
+    // ✅ allow true Activities even if they have no website
     const openAtTime = venues
       .filter((v) => (v.category === "Activity" ? true : Boolean(v.website)))
       .filter((v) => isVenueOpenAt(v.hours, datetime))
