@@ -1,9 +1,6 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 type PlanItem = {
   id: string;
@@ -34,111 +31,150 @@ async function copyText(text: string) {
   }
 }
 
+type ParsedPlan = {
+  isValid: boolean;
+  datetimeLabel: string | null;
+  restaurant: PlanItem;
+  activity: PlanItem;
+  bar: PlanItem;
+  fullUrl: string;
+};
+
 export default function SharedPlanPage() {
-  const searchParams = useSearchParams();
-
-  // Convert Next's ReadonlyURLSearchParams into a real URLSearchParams
-  const params = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams]);
-
-  // Build fullUrl on client only
-  const [fullUrl, setFullUrl] = useState<string>("");
+  // IMPORTANT: do not touch window during initial render (prerender-safe)
+  const [mounted, setMounted] = useState(false);
+  const [plan, setPlan] = useState<ParsedPlan | null>(null);
 
   useEffect(() => {
-    // window exists here (client)
-    setFullUrl(window.location.href);
+    setMounted(true);
+
+    const sp = new URLSearchParams(window.location.search);
+
+    // Required params
+    const d = getString(sp, "d");
+    const r = getString(sp, "r");
+    const a = getString(sp, "a");
+    const b = getString(sp, "b");
+
+    // Fallback display fields (optional)
+    const restaurant: PlanItem = {
+      id: r ?? "",
+      name: getString(sp, "rn"),
+      suburb: getString(sp, "rs"),
+      website: getString(sp, "rw"),
+      eatClubUrl: getString(sp, "re"),
+    };
+
+    const activity: PlanItem = {
+      id: a ?? "",
+      name: getString(sp, "an"),
+      suburb: getString(sp, "as"),
+      website: getString(sp, "aw"),
+      eatClubUrl: getString(sp, "ae"),
+    };
+
+    const bar: PlanItem = {
+      id: b ?? "",
+      name: getString(sp, "bn"),
+      suburb: getString(sp, "bs"),
+      website: getString(sp, "bw"),
+      eatClubUrl: getString(sp, "be"),
+    };
+
+    const datetimeLabel = (() => {
+      if (!d) return null;
+      const dt = new Date(d);
+      if (Number.isNaN(dt.getTime())) return d;
+      return dt.toLocaleString();
+    })();
+
+    const isValid = Boolean(d && r && a && b);
+
+    const fullUrl = window.location.href;
+
+    setPlan({
+      isValid,
+      datetimeLabel,
+      restaurant,
+      activity,
+      bar,
+      fullUrl,
+    });
   }, []);
 
-  // Required params
-  const d = getString(params, "d");
-  const r = getString(params, "r");
-  const a = getString(params, "a");
-  const b = getString(params, "b");
+  const Card = useMemo(() => {
+    return function CardInner({
+      label,
+      item,
+    }: {
+      label: "Food" | "Activity" | "Bar";
+      item: PlanItem;
+    }) {
+      const title = item.name ?? `(ID: ${item.id})`;
+      const subtitle = item.suburb ?? "Sydney";
 
-  // Fallback display fields (optional)
-  const restaurant: PlanItem = {
-    id: r ?? "",
-    name: getString(params, "rn"),
-    suburb: getString(params, "rs"),
-    website: getString(params, "rw"),
-    eatClubUrl: getString(params, "re"),
-  };
+      return (
+        <div
+          style={{
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 16,
+            padding: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
+            <div style={{ fontWeight: 800 }}>{title}</div>
+            <div className="small" style={{ marginTop: 4 }}>
+              {subtitle}
+            </div>
+          </div>
 
-  const activity: PlanItem = {
-    id: a ?? "",
-    name: getString(params, "an"),
-    suburb: getString(params, "as"),
-    website: getString(params, "aw"),
-    eatClubUrl: getString(params, "ae"),
-  };
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {item.website && (
+              <a className="actionBtn" href={item.website} target="_blank" rel="noreferrer">
+                Website
+              </a>
+            )}
+            <a className="actionBtn" href={directionsUrl(subtitle)} target="_blank" rel="noreferrer">
+              Directions
+            </a>
+            {item.eatClubUrl && (
+              <a className="actionBtn" href={item.eatClubUrl} target="_blank" rel="noreferrer">
+                EatClub
+              </a>
+            )}
+          </div>
+        </div>
+      );
+    };
+  }, []);
 
-  const bar: PlanItem = {
-    id: b ?? "",
-    name: getString(params, "bn"),
-    suburb: getString(params, "bs"),
-    website: getString(params, "bw"),
-    eatClubUrl: getString(params, "be"),
-  };
-
-  const datetimeLabel = (() => {
-    if (!d) return null;
-    const dt = new Date(d);
-    if (Number.isNaN(dt.getTime())) return d; // fallback to raw string
-    return dt.toLocaleString();
-  })();
-
-  const isValid = Boolean(d && r && a && b);
-
-  const Card = ({
-    label,
-    item,
-  }: {
-    label: "Food" | "Activity" | "Bar";
-    item: PlanItem;
-  }) => {
-    const title = item.name ?? `(ID: ${item.id})`;
-    const subtitle = item.suburb ?? "Sydney";
-
+  // Prerender-safe placeholder (build time will render this)
+  if (!mounted || !plan) {
     return (
-      <div
-        style={{
-          border: "1px solid rgba(255,255,255,0.10)",
-          borderRadius: 16,
-          padding: 12,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
-          <div style={{ fontWeight: 800 }}>{title}</div>
-          <div className="small" style={{ marginTop: 4 }}>
-            {subtitle}
+      <div className="container">
+        <div className="header">
+          <div>
+            <div className="h1">Shared Night Plan</div>
+            <div className="sub">Loading...</div>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {item.website && (
-            <a className="actionBtn" href={item.website} target="_blank" rel="noreferrer">
-              Website
-            </a>
-          )}
-          <a className="actionBtn" href={directionsUrl(subtitle)} target="_blank" rel="noreferrer">
-            Directions
-          </a>
-          {item.eatClubUrl && (
-            <a className="actionBtn" href={item.eatClubUrl} target="_blank" rel="noreferrer">
-              EatClub
-            </a>
-          )}
+        <div className="panel" style={{ marginTop: 14 }}>
+          <div className="sub" style={{ opacity: 0.7 }}>
+            Preparing your plan from the link.
+          </div>
         </div>
       </div>
     );
-  };
+  }
 
-  if (!isValid) {
+  if (!plan.isValid) {
     return (
       <div className="container">
         <div className="header">
@@ -172,7 +208,7 @@ export default function SharedPlanPage() {
       <div className="header">
         <div>
           <div className="h1">Shared Night Plan</div>
-          <div className="sub">{datetimeLabel ? `For: ${datetimeLabel}` : "Plan details"}</div>
+          <div className="sub">{plan.datetimeLabel ? `For: ${plan.datetimeLabel}` : "Plan details"}</div>
         </div>
 
         <a className="actionBtn" href="/">
@@ -182,38 +218,33 @@ export default function SharedPlanPage() {
 
       <div className="panel" style={{ marginTop: 14 }}>
         <div style={{ display: "grid", gap: 10 }}>
-          <Card label="Food" item={restaurant} />
-          <Card label="Activity" item={activity} />
-          <Card label="Bar" item={bar} />
+          <Card label="Food" item={plan.restaurant} />
+          <Card label="Activity" item={plan.activity} />
+          <Card label="Bar" item={plan.bar} />
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
           <button
             type="button"
             onClick={async () => {
-              const link = fullUrl || params.toString(); // fallback
-              const ok = await copyText(link);
+              const ok = await copyText(plan.fullUrl);
               if (!ok) {
-                window.prompt("Copy this link:", link);
+                window.prompt("Copy this link:", plan.fullUrl);
                 return;
               }
               alert("Link copied.");
             }}
-            disabled={!fullUrl}
           >
             Copy this link
           </button>
 
-          {fullUrl && (
-            <a className="actionBtn" href={fullUrl} target="_blank" rel="noreferrer">
-              Open in new tab
-            </a>
-          )}
+          <a className="actionBtn" href={plan.fullUrl} target="_blank" rel="noreferrer">
+            Open in new tab
+          </a>
         </div>
 
         <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
-          Note: If names are missing, the share link didn’t include fallback details. Re-share from
-          the homepage.
+          Note: If names are missing, the share link didn’t include fallback details. Re-share from the homepage.
         </div>
       </div>
     </div>
