@@ -154,7 +154,7 @@ function scoreVenue(v: Venue, atDate: Date): number {
   const hasBooking = Boolean(v.bookingUrl && v.bookingUrl.trim().length);
   const actionNorm = clamp01((Number(hasWebsite) + Number(hasBooking)) / 2);
 
-  // Weights (simple + explainable in an interview)
+  // Weights
   const wOpen = 0.6;
   const wEat = 0.25;
   const wAction = 0.15;
@@ -173,6 +173,57 @@ function pickFromTopScored(list: Venue[], atDate: Date, topFraction = 0.25): Ven
   const n = Math.max(1, Math.ceil(scored.length * topFraction));
   const top = scored.slice(0, n).map((x) => x.v);
   return pickRandom(top);
+}
+
+/* ------------------ Share helpers ------------------ */
+
+function cleanStr(s: string | null | undefined) {
+  const t = (s ?? "").trim();
+  return t.length ? t : "";
+}
+
+function buildPlanShareUrl(args: {
+  datetime: string;
+  restaurant: Venue;
+  activity: Venue;
+  bar: Venue;
+}) {
+  const { datetime, restaurant, activity, bar } = args;
+
+  const p = new URLSearchParams();
+  p.set("d", datetime);
+
+  // required IDs
+  p.set("r", restaurant.id);
+  p.set("a", activity.id);
+  p.set("b", bar.id);
+
+  // fallback display fields (so /plan renders nicely without server lookups)
+  p.set("rn", cleanStr(restaurant.name));
+  p.set("rs", cleanStr(restaurant.suburb));
+  if (restaurant.website) p.set("rw", cleanStr(restaurant.website));
+  if (restaurant.eatClubUrl) p.set("re", cleanStr(restaurant.eatClubUrl));
+
+  p.set("an", cleanStr(activity.name));
+  p.set("as", cleanStr(activity.suburb));
+  if (activity.website) p.set("aw", cleanStr(activity.website));
+  if (activity.eatClubUrl) p.set("ae", cleanStr(activity.eatClubUrl));
+
+  p.set("bn", cleanStr(bar.name));
+  p.set("bs", cleanStr(bar.suburb));
+  if (bar.website) p.set("bw", cleanStr(bar.website));
+  if (bar.eatClubUrl) p.set("be", cleanStr(bar.eatClubUrl));
+
+  return `/plan?${p.toString()}`;
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* ------------------ Page ------------------ */
@@ -404,12 +455,17 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const canShare =
+    Boolean(nightPlan?.restaurant && nightPlan?.activity && nightPlan?.bar) && !loading;
+
   return (
     <div className="container">
       <div className="header">
         <div>
           <div className="h1">What Still Open Sydney</div>
-          <div className="sub">Enter a time. Get venues that are open, with website links and directions.</div>
+          <div className="sub">
+            Enter a time. Get venues that are open, with website links and directions.
+          </div>
         </div>
 
         <div className="sub">Live (Google Places)</div>
@@ -473,6 +529,50 @@ export default function HomePage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* ✅ Share controls */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+            <button
+              type="button"
+              disabled={!canShare}
+              onClick={async () => {
+                if (!nightPlan?.restaurant || !nightPlan?.activity || !nightPlan?.bar) return;
+
+                const path = buildPlanShareUrl({
+                  datetime,
+                  restaurant: nightPlan.restaurant,
+                  activity: nightPlan.activity,
+                  bar: nightPlan.bar,
+                });
+
+                const full = `${window.location.origin}${path}`;
+                const ok = await copyText(full);
+                if (!ok) {
+                  window.prompt("Copy this link:", full);
+                  return;
+                }
+                alert("Share link copied.");
+              }}
+            >
+              Share this plan
+            </button>
+
+            {canShare && nightPlan?.restaurant && nightPlan?.activity && nightPlan?.bar && (
+              <a
+                className="actionBtn"
+                href={buildPlanShareUrl({
+                  datetime,
+                  restaurant: nightPlan.restaurant,
+                  activity: nightPlan.activity,
+                  bar: nightPlan.bar,
+                })}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open share page
+              </a>
+            )}
           </div>
 
           <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
