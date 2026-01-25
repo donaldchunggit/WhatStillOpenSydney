@@ -198,7 +198,7 @@ function buildPlanShareUrl(args: {
   p.set("a", activity.id);
   p.set("b", bar.id);
 
-  // fallback display fields (so /plan renders nicely without server lookups)
+  // fallback display fields
   p.set("rn", cleanStr(restaurant.name));
   p.set("rs", cleanStr(restaurant.suburb));
   if (restaurant.website) p.set("rw", cleanStr(restaurant.website));
@@ -596,7 +596,16 @@ export default function HomePage() {
               type="datetime-local"
               value={datetime}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDatetime(e.target.value)}
-              style={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}
+              style={{
+                width: "100%",
+                maxWidth: "100%",
+                boxSizing: "border-box",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                WebkitAppearance: "none",
+                appearance: "none",
+              }}
             />
           </div>
 
