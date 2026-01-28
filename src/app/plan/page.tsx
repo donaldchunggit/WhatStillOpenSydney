@@ -97,6 +97,9 @@ export default function SharedPlanPage() {
   // prerender-safe
   const [mounted, setMounted] = useState(false);
   const [plan, setPlan] = useState<ParsedPlan | null>(null);
+  const [reasoning, setReasoning] = useState<string | null>(null);
+  const [reasoningLoading, setReasoningLoading] = useState(false);
+  const [reasoningError, setReasoningError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -157,6 +160,54 @@ export default function SharedPlanPage() {
       fullUrl: window.location.href,
     });
   }, []);
+
+  // Fetch AI reasoning when plan is valid
+  useEffect(() => {
+    if (!plan?.isValid || !plan.datetimeRaw) return;
+
+    setReasoningLoading(true);
+    setReasoningError(null);
+
+    const fetchReasoning = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("datetime", plan.datetimeRaw!);
+        params.set("r", plan.restaurant.id);
+        params.set("a", plan.activity.id);
+        params.set("b", plan.bar.id);
+        
+        // Add optional display fields
+        if (plan.restaurant.name) params.set("rn", plan.restaurant.name);
+        if (plan.restaurant.suburb) params.set("rs", plan.restaurant.suburb);
+        if (plan.restaurant.website) params.set("rw", plan.restaurant.website);
+        if (plan.restaurant.eatClubUrl) params.set("re", plan.restaurant.eatClubUrl);
+        
+        if (plan.activity.name) params.set("an", plan.activity.name);
+        if (plan.activity.suburb) params.set("as", plan.activity.suburb);
+        if (plan.activity.website) params.set("aw", plan.activity.website);
+        if (plan.activity.eatClubUrl) params.set("ae", plan.activity.eatClubUrl);
+        
+        if (plan.bar.name) params.set("bn", plan.bar.name);
+        if (plan.bar.suburb) params.set("bs", plan.bar.suburb);
+        if (plan.bar.website) params.set("bw", plan.bar.website);
+        if (plan.bar.eatClubUrl) params.set("be", plan.bar.eatClubUrl);
+
+        const res = await fetch(`/api/plan-reasoning?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error("Failed to fetch reasoning");
+        }
+
+        const data = await res.json();
+        setReasoning(data.reasoning || null);
+      } catch (err: any) {
+        setReasoningError(err?.message ?? "Could not load reasoning");
+      } finally {
+        setReasoningLoading(false);
+      }
+    };
+
+    fetchReasoning();
+  }, [plan]);
 
   const Card = useMemo(() => {
     return function CardInner({
@@ -335,6 +386,64 @@ export default function SharedPlanPage() {
           <Card label="Bar" item={plan.bar} />
         </div>
 
+        {/* AI Reasoning Section */}
+        <div
+          style={{
+            marginTop: 20,
+            padding: 16,
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 16,
+            background: "rgba(255,255,255,0.02)",
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, opacity: 0.9 }}>
+            🤖 Why these locations?
+          </div>
+          
+          {reasoningLoading && (
+            <div className="sub" style={{ opacity: 0.7 }}>
+              Generating reasoning...
+            </div>
+          )}
+          
+          {reasoningError && (
+            <div style={{ color: "#ffb4b4", fontSize: 14 }}>
+              {reasoningError}
+            </div>
+          )}
+          
+          {reasoning && !reasoningLoading && (
+            <div
+              style={{
+                fontSize: 14,
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                opacity: 0.9,
+              }}
+            >
+              {reasoning.split("\n").map((line, i) => {
+                // Simple markdown-style bold handling
+                if (line.startsWith("**") && line.endsWith("**")) {
+                  const text = line.slice(2, -2);
+                  return (
+                    <div key={i} style={{ fontWeight: 700, marginTop: i > 0 ? 12 : 0, marginBottom: 6 }}>
+                      {text}
+                    </div>
+                  );
+                }
+                if (line.trim() === "") {
+                  return <br key={i} />;
+                }
+                return (
+                  <div key={i} style={{ marginBottom: 4 }}>
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* Share controls */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
           <button
@@ -379,7 +488,7 @@ export default function SharedPlanPage() {
         </div>
 
         <div className="sub" style={{ marginTop: 10, opacity: 0.7 }}>
-          If names/addresses are missing, the share link didn’t include fallback details. Re-share from the
+          If names/addresses are missing, the share link didn't include fallback details. Re-share from the
           homepage.
         </div>
       </div>
