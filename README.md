@@ -1,36 +1,133 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# What Still Open Sydney
 
-## Getting Started
+**What Still Open Sydney** is a fast, mobile-first web app that answers one deceptively hard question:
 
-First, run the development server:
+> **“What’s actually open right now?”**
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Instead of static opening hours or unreliable “Open Now” badges, the app uses **live Google Places data**, **client-side time reasoning**, and a **lightweight ranking algorithm** to surface venues that are genuinely useful *at a specific time*.  
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+It also includes **Plan My Night ✨**, an itinerary generator that builds a **Food → Activity → Bar** plan and makes it instantly shareable.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🚀 Live Demo Features
 
-## Learn More
+### 🔎 Time-aware venue search
+- Select any **date & time**
+- Search by:
+  - **Suburb**
+  - **Near Me** (browser geolocation + adjustable radius)
+- Optional **category filter**:
+  - Restaurant, Cafe, Dessert, Activity, Bar
+- Each result shows:
+  - Photo (Google Places)
+  - Suburb
+  - **“Closes in …”** (computed client-side)
+  - Website & Directions
+  - EatClub availability badge (if detected)
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### ✨ Plan My Night (Algorithmic Itinerary Builder)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Generates a 3-step night plan:
+1. **Food**
+2. **Activity**
+3. **Bar**
 
-## Deploy on Vercel
+How it works:
+- Runs **three category-specific searches** using the same time + location context
+- Enriches venues with EatClub detection
+- Scores venues using a **weighted model**
+- Samples **randomly from the top 25%** to avoid repetitive results
+- Ensures **no duplicate venues** across the itinerary
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The result is a plan that’s:
+- High quality
+- Non-deterministic (variety)
+- Explainable (see below)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+### 🧠 Explainability Panel (Recruiter Gold)
+
+Each suggested venue can expose a **“Why was this picked?”** breakdown:
+
+- Minutes until close (normalized)
+- EatClub bonus
+- Actionability score (website / booking link)
+- Final weighted score
+
+This makes the ranking logic:
+- Transparent
+- Debuggable
+- Easy to discuss in interviews
+
+> Not a black box — every decision is explainable.
+
+---
+
+### 🔗 Shareable Plans
+Generated plans can be shared via a URL that serializes:
+- Selected datetime
+- Venue IDs
+- Fallback display fields (name, suburb, links)
+
+Anyone opening the link sees the **same itinerary**, instantly.
+
+---
+
+## ⚙️ Scoring & Ranking Model
+
+Each venue is scored using **only data the app already has**.
+
+### Inputs
+- **Open-time score**  
+  Minutes until close, normalized and capped at 4 hours
+- **EatClub bonus**  
+  Binary signal (on EatClub or not)
+- **Actionability score**
+  - Has website
+  - Has booking link
+
+### Weights
+| Factor | Weight |
+|------|--------|
+| Open time | 0.60 |
+| EatClub | 0.25 |
+| Actionability | 0.15 |
+
+### Selection Strategy
+Instead of always picking the top-ranked venue:
+- Venues are sorted by score
+- A random pick is made from the **top 25%**
+- This balances **quality + variety**
+
+---
+
+## 🧱 Tech Stack
+
+- **Next.js (App Router)**
+- **TypeScript**
+- **Google Places API**
+  - Text Search
+  - Nearby Search
+  - Photos
+- Client-side time parsing & cross-midnight handling
+- REST API routes for data fetching and enrichment
+
+---
+
+## 🗂️ Project Structure (Key Files)
+
+```text
+app/
+├── page.tsx                # Main UI, state, scoring & Plan My Night logic
+├── plan/page.tsx           # Shared plan view
+├── api/
+│   ├── search-google/      # Suburb-based Places search
+│   ├── search-nearby/      # Nearby (lat/lng/radius) search
+│   ├── photo/              # Google Places photo proxy
+│   └── eatclub-check/      # EatClub enrichment
+lib/
+└── types.ts                # Shared TypeScript types
